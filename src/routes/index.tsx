@@ -16,8 +16,10 @@ import { Textarea } from "@/components/ui/textarea";
 type Role = "dispatcher" | "customer" | "technician" | "operations";
 type Priority = "Critical" | "High" | "Medium" | "Low";
 
-const incidents: Array<{ id: string; place: string; detail: string; priority: Priority; people: string; age: string; x: string; y: string }> = [
-  { id: "#GG-4821", place: "Soshanguve Block H", detail: "Primary transformer failure", priority: "Critical", people: "5,240", age: "8 min", x: "27%", y: "29%" },
+const primaryIncident: { id: string; place: string; detail: string; priority: Priority; people: string; age: string; x: string; y: string } = { id: "#GG-4821", place: "Soshanguve Block H", detail: "Primary transformer failure", priority: "Critical", people: "5,240", age: "8 min", x: "27%", y: "29%" };
+
+const incidents: Array<typeof primaryIncident> = [
+  primaryIncident,
   { id: "#GG-4819", place: "Pretoria CBD", detail: "Substation trip · Church St", priority: "High", people: "1,860", age: "14 min", x: "51%", y: "55%" },
   { id: "#GG-4814", place: "Hatfield", detail: "Partial supply interruption", priority: "Medium", people: "420", age: "23 min", x: "67%", y: "45%" },
   { id: "#GG-4808", place: "Centurion", detail: "Residential feeder fault", priority: "Low", people: "68", age: "37 min", x: "57%", y: "78%" },
@@ -137,7 +139,7 @@ function CityMap({ compact = false }: { compact?: boolean }) {
 
 function DispatcherView() {
   const [filter, setFilter] = useState("All");
-  const [selected, setSelected] = useState(incidents[0]);
+  const [selected, setSelected] = useState(primaryIncident);
   const [assigned, setAssigned] = useState<string | null>(null);
   const filtered = useMemo(() => filter === "All" ? incidents : incidents.filter((item) => item.priority === filter), [filter]);
   return <>
