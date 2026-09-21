@@ -34,3 +34,10 @@ export const technicians = [
   { name: "Maria Dlamini", skill: "Infrastructure", distance: "5.8 km", status: "Available", initials: "MD" },
   { name: "James Nkosi", skill: "Electrical", distance: "8.1 km", status: "On job", initials: "JN" },
 ];
+
+export const mockUsers = [
+  { role: "Customer", name: "Lerato Sithole", email: "lerato.sithole@gmail.com", password: "Lerato#Mamelodi24", to: "/dashboard/customer" },
+  { role: "Technician", name: "Thabo Molefe", email: "thabo.molefe@lesedilink.co.za", password: "Thabo!HV2026", to: "/dashboard/technician" },
+  { role: "Dispatcher", name: "Naledi Mokoena", email: "naledi.mokoena@lesedilink.co.za", password: "Naledi@Control7", to: "/dashboard/dispatcher" },
+  { role: "Department manager", name: "Kagiso Phiri", email: "kagiso.phiri@lesedilink.co.za", password: "Kagiso$Energy2026", to: "/dashboard/manager" },
+] as const;

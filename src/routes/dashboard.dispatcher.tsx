@@ -27,7 +27,7 @@ function DispatcherDashboard() {
   const filtered = useMemo(() => filter === "All" ? incidents : incidents.filter((item) => item.priority === filter), [filter]);
 
   return (
-    <DashboardShell user="Naledi Mokoena" role="Senior dispatcher">
+    <DashboardShell home="/dashboard/dispatcher" user="Naledi Mokoena" role="Senior dispatcher">
       <PageHeading eyebrow="Dispatcher" title="Control centre" text="City-wide electricity response overview" action={<Button><Radio /> Live operations</Button>} />
 
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Live response metrics">

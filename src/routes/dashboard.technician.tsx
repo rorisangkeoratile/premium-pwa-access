@@ -39,7 +39,7 @@ function TechnicianDashboard() {
   }
 
   return (
-    <DashboardShell user="Thabo Molefe" role="Field technician · High voltage">
+    <DashboardShell home="/dashboard/technician" user="Thabo Molefe" role="Field technician · High voltage">
       <PageHeading eyebrow="Technician" title="Active job · #LL-4821" text="Soshanguve Block H · Primary transformer failure" action={<span className="rounded-full bg-warning-soft px-3 py-2 text-xs font-extrabold">GPS ACTIVE</span>} />
 
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Shift summary">

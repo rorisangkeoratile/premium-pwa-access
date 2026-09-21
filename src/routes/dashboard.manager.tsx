@@ -24,7 +24,7 @@ function ManagerDashboard() {
   const [range, setRange] = useState("7 days");
 
   return (
-    <DashboardShell user="Kagiso Phiri" role="Department manager · Energy & Electricity">
+    <DashboardShell home="/dashboard/manager" user="Kagiso Phiri" role="Department manager · Energy & Electricity">
       <PageHeading eyebrow="Department manager" title="Network intelligence" text="Performance, recurring faults, spend and resource planning" action={<Button variant="outline" onClick={() => alert("Report prepared for download.")}><Download /> Export report</Button>} />
 
       <div className="mb-5 flex gap-2">{["24 hours", "7 days", "30 days"].map((item) => <Button key={item} size="sm" variant={range === item ? "default" : "outline"} onClick={() => setRange(item)}>{item}</Button>)}</div>

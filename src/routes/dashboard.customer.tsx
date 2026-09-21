@@ -26,7 +26,7 @@ function CustomerDashboard() {
   function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setSubmitted(true); }
 
   return (
-    <DashboardShell user="Lerato Sithole" role="Resident · Mamelodi East">
+    <DashboardShell home="/dashboard/customer" user="Lerato Sithole" role="Resident · Mamelodi East">
       <PageHeading eyebrow="Customer" title="My power" text="Report a fault, follow the repair and stay ahead of planned interruptions." action={<div className="hidden rounded-full bg-success-soft px-3 py-2 text-xs font-bold text-success sm:block"><ShieldCheck className="mr-1 inline size-4" /> Secure report</div>} />
 
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Account summary">

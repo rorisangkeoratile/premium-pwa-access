@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardCustomerRouteImport } from './routes/dashboard.customer'
 import { Route as DashboardDispatcherRouteImport } from './routes/dashboard.dispatcher'
 import { Route as DashboardManagerRouteImport } from './routes/dashboard.manager'
@@ -18,6 +19,11 @@ import { Route as DashboardTechnicianRouteImport } from './routes/dashboard.tech
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardCustomerRoute = DashboardCustomerRouteImport.update({
@@ -43,6 +49,7 @@ const DashboardTechnicianRoute = DashboardTechnicianRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
   '/dashboard/customer': typeof DashboardCustomerRoute
   '/dashboard/dispatcher': typeof DashboardDispatcherRoute
   '/dashboard/manager': typeof DashboardManagerRoute
@@ -50,6 +57,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
   '/dashboard/customer': typeof DashboardCustomerRoute
   '/dashboard/dispatcher': typeof DashboardDispatcherRoute
   '/dashboard/manager': typeof DashboardManagerRoute
@@ -58,6 +66,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
   '/dashboard/customer': typeof DashboardCustomerRoute
   '/dashboard/dispatcher': typeof DashboardDispatcherRoute
   '/dashboard/manager': typeof DashboardManagerRoute
@@ -67,6 +76,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/login'
     | '/dashboard/customer'
     | '/dashboard/dispatcher'
     | '/dashboard/manager'
@@ -74,6 +84,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/login'
     | '/dashboard/customer'
     | '/dashboard/dispatcher'
     | '/dashboard/manager'
@@ -81,6 +92,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/login'
     | '/dashboard/customer'
     | '/dashboard/dispatcher'
     | '/dashboard/manager'
@@ -89,6 +101,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  LoginRoute: typeof LoginRoute
   DashboardCustomerRoute: typeof DashboardCustomerRoute
   DashboardDispatcherRoute: typeof DashboardDispatcherRoute
   DashboardManagerRoute: typeof DashboardManagerRoute
@@ -102,6 +115,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard/customer': {
@@ -137,6 +157,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  LoginRoute: LoginRoute,
   DashboardCustomerRoute: DashboardCustomerRoute,
   DashboardDispatcherRoute: DashboardDispatcherRoute,
   DashboardManagerRoute: DashboardManagerRoute,
