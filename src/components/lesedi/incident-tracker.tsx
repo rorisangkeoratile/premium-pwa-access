@@ -52,6 +52,7 @@ export function IncidentTracker({ incident, own = false, point, onUnfollow, labe
           subtitle={driving ? (route ? `${incident.techFirst} is about ${route.minutes} min away` : "Finding the route…") : showCrew ? `${incident.techFirst}'s live position${incident.stage >= 2 ? " · on site now" : ""}` : own ? incident.status : "Approximate area · exact addresses are not shown"}
           markers={markers}
           route={driving ? (route?.coords ?? null) : null}
+          fitKey={`${showCrew ? "crew" : "none"}-${driving && route ? "route" : "noroute"}`}
           area={own ? null : { lat: incident.lat, lng: incident.lng, radiusM: incident.radiusM }}
           heightClass="h-72"
         />

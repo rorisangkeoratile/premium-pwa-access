@@ -32,6 +32,11 @@ type LiveMapProps = {
   route?: [number, number][] | null;
   /** An affected area drawn as a shaded circle (used in place of an exact pin). */
   area?: { lat: number; lng: number; radiusM: number } | null;
+  /**
+   * Change this to re-frame the map so everything on it is in view. The map otherwise frames itself only
+   * once, which would leave a technician who starts far away off-screen.
+   */
+  fitKey?: string;
   /** Picker mode: a draggable pin the user can place by tapping the map. */
   pin?: { lat: number; lng: number } | null;
   pinAccuracy?: number | undefined;
@@ -76,7 +81,7 @@ export function crewMarkers(crews: { name: string; skill: string; status: string
   });
 }
 
-export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro", markers = [], heightClass = "h-[390px]", focus, onSelect, route, area, pin, pinAccuracy, onPin }: LiveMapProps) {
+export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro", markers = [], heightClass = "h-[390px]", focus, onSelect, route, area, fitKey, pin, pinAccuracy, onPin }: LiveMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const lib = useRef<LeafletLib | null>(null);
   const map = useRef<LeafletMap | null>(null);
@@ -87,6 +92,7 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
   const areaCircle = useRef<Circle | null>(null);
   const pinFromMap = useRef(false);
   const fitted = useRef(false);
+  const lastFitKey = useRef<string | undefined>(undefined);
   const onSelectRef = useRef(onSelect);
   const onPinRef = useRef(onPin);
   const [ready, setReady] = useState(false);
@@ -129,6 +135,22 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
     };
   }, []);
 
+  /** Frame everything the map is drawing: markers, the route line and the affected-area circle. */
+  const frameAll = () => {
+    const L = lib.current;
+    if (!L || !map.current) return;
+    const points: [number, number][] = markers.map((item) => [item.lat, item.lng]);
+    if (route) points.push(...route);
+    if (points.length === 0 && !area) return;
+    const bounds = points.length > 0 ? L.latLngBounds(points) : L.latLngBounds([]);
+    // A square around the affected-area circle. Leaflet's Circle.getBounds() needs the circle to be on a
+    // map, so it cannot be used here.
+    if (area) bounds.extend(L.latLng(area.lat, area.lng).toBounds(area.radiusM * 2));
+    if (!bounds.isValid()) return;
+    fitted.current = true;
+    map.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+  };
+
   // Draw incident, crew and GPS markers.
   useEffect(() => {
     const L = lib.current;
@@ -142,8 +164,16 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
     if (!fitted.current && !pin && markers.length > 0) {
       fitted.current = true;
       map.current.fitBounds(L.latLngBounds(markers.map((item) => [item.lat, item.lng] as [number, number])), { padding: [40, 40], maxZoom: 13 });
+      return;
     }
-  }, [ready, markers, pin]);
+    // A marker can move a long way after the map framed itself: a technician's first real GPS reading
+    // replaces their depot position, and then they drive. Re-frame only when one leaves the view, so the
+    // map does not jump about while they are on screen.
+    if (fitKey !== undefined && fitted.current && markers.length > 1 && !pin) {
+      const view = map.current.getBounds();
+      if (markers.some((item) => !view.contains([item.lat, item.lng]))) frameAll();
+    }
+  }, [ready, markers, pin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Affected area, drawn as a circle so no one's exact address is revealed.
   useEffect(() => {
@@ -156,6 +186,14 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
       map.current.fitBounds(areaCircle.current!.getBounds(), { padding: [30, 30] });
     }
   }, [ready, area?.lat, area?.lng, area?.radiusM]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-frame everything when the caller says something important appeared, such as the technician's marker
+  // and route arriving on a resident's tracker. Without this they would be drawn outside the current view.
+  useEffect(() => {
+    if (!ready || fitKey === undefined || fitKey === lastFitKey.current) return;
+    lastFitKey.current = fitKey;
+    frameAll();
+  }, [ready, fitKey, markers, route, area]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Road route (e.g. technician to job), drawn under the markers.
   useEffect(() => {
