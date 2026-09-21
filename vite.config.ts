@@ -7,6 +7,8 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { VitePWA } from "vite-plugin-pwa";
 
+const staticSpa = process.env["RENDER"] === "true" || process.env["STATIC_SPA"] === "1";
+
 export default defineConfig({
   vite: {
     plugins: [
@@ -39,5 +41,10 @@ export default defineConfig({
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
     server: { entry: "server" },
+    // Static hosting (Render Static Site, Netlify, S3...). The build then writes a plain index.html next
+    // to the JS and CSS in .output/public and the browser renders every page. Render sets RENDER=true
+    // during its builds; set STATIC_SPA=1 to get the same output locally. Without either, the app builds
+    // for a server (Cloudflare by default), exactly as before.
+    ...(staticSpa ? { spa: { enabled: true, prerender: { enabled: true, outputPath: "/index.html", crawlLinks: false, retryCount: 0 } } } : {}),
   },
 });
