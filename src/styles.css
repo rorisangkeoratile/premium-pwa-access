@@ -187,8 +187,85 @@
 .ll-pin--crew { background: var(--color-success); }
 .ll-pin--me { background: var(--color-primary); }
 .ll-route { stroke: var(--color-primary); }
+.ll-area { stroke: var(--color-destructive); fill: var(--color-destructive); }
 .ll-node { display: block; width: 16px; height: 16px; border-radius: 4px; border: 2px solid var(--color-card); background: var(--color-success); box-shadow: 0 1px 4px rgb(0 0 0 / 0.4); }
 .ll-node--late { background: var(--color-warning); }
 .ll-node--silent { background: var(--color-destructive); }
 .ll-pin--me::after { content: ""; position: absolute; inset: -3px; border-radius: 9999px; border: 2px solid var(--color-primary); animation: ll-pulse 1.8s ease-out infinite; }
 @keyframes ll-pulse { from { transform: scale(1); opacity: 0.9; } to { transform: scale(2.2); opacity: 0; } }
+
+/* ---------- Gradients ---------- */
+@utility bg-brand-gradient {
+  background-image: linear-gradient(135deg, oklch(0.5 0.13 248), oklch(0.4 0.115 249) 55%, oklch(0.33 0.1 251));
+}
+@utility bg-navy-gradient {
+  background-image: linear-gradient(160deg, oklch(0.33 0.09 249), oklch(0.27 0.07 248) 55%, oklch(0.22 0.06 252));
+}
+@utility bg-soft-gradient {
+  background-image: linear-gradient(180deg, oklch(1 0 0), oklch(0.975 0.012 246));
+}
+
+.hero-bg {
+  background-image:
+    radial-gradient(55% 75% at 82% 8%, oklch(0.55 0.15 250 / 0.55), transparent 62%),
+    radial-gradient(45% 60% at 8% 105%, oklch(0.62 0.17 48 / 0.25), transparent 62%),
+    linear-gradient(160deg, oklch(0.23 0.07 250), oklch(0.32 0.1 250) 52%, oklch(0.21 0.06 256));
+  background-size: 160% 160%;
+  animation: hero-shift 22s ease-in-out infinite alternate;
+}
+@keyframes hero-shift { from { background-position: 0% 30%; } to { background-position: 100% 70%; } }
+
+/* Keeps hero text readable over the tower artwork. */
+.hero-veil {
+  background-image: linear-gradient(90deg, oklch(0.22 0.065 250 / 0.92) 0%, oklch(0.22 0.065 250 / 0.62) 38%, transparent 72%);
+}
+@media (max-width: 1023px) {
+  .hero-veil { background-image: linear-gradient(180deg, oklch(0.22 0.065 250 / 0.9), oklch(0.22 0.065 250 / 0.8)); }
+}
+.gradient-text {
+  background-image: linear-gradient(100deg, oklch(1 0 0), oklch(0.85 0.09 235) 55%, oklch(0.8 0.15 55));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---------- Motion ---------- */
+.reveal-hidden { opacity: 0; transform: translateY(26px); }
+.reveal-shown { opacity: 1; transform: none; transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1); }
+
+.lift { transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease; }
+.lift:hover { transform: translateY(-3px); box-shadow: 0 14px 28px -14px oklch(0.27 0.07 248 / 0.35); border-color: var(--color-primary); }
+
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.page-enter > * { animation: rise 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.page-enter > *:nth-child(2) { animation-delay: 60ms; }
+.page-enter > *:nth-child(3) { animation-delay: 120ms; }
+.page-enter > *:nth-child(4) { animation-delay: 180ms; }
+.page-enter > *:nth-child(5) { animation-delay: 240ms; }
+.page-enter > *:nth-child(6) { animation-delay: 300ms; }
+.page-enter > *:nth-child(n + 7) { animation-delay: 360ms; }
+
+@keyframes feed-in { from { opacity: 0; transform: translateY(-14px) scale(0.98); } to { opacity: 1; transform: none; } }
+.feed-in { animation: feed-in 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+
+@keyframes float-slow { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+.float-slow { animation: float-slow 7s ease-in-out infinite; }
+
+@keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+.shimmer-bar { background-image: linear-gradient(90deg, transparent, oklch(1 0 0 / 0.5), transparent); background-size: 200% 100%; animation: shimmer 2.4s linear infinite; }
+
+/* Tower artwork */
+.tower-layer { will-change: transform; transition: transform 0.25s ease-out; }
+.wire-pulse { stroke-dasharray: 4 96; animation: pulse-run 4.5s linear infinite; filter: drop-shadow(0 0 3px oklch(0.78 0.17 55)); }
+@keyframes pulse-run { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+.beacon { animation: beacon 2.4s ease-in-out infinite; }
+@keyframes beacon { 0%, 100% { opacity: 0.15; } 50% { opacity: 1; } }
+.spark { animation: spark 6s ease-in-out infinite; }
+@keyframes spark { 0%, 100% { opacity: 0.1; } 50% { opacity: 0.7; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-bg, .float-slow, .wire-pulse, .beacon, .spark, .shimmer-bar { animation: none !important; }
+  .page-enter > *, .feed-in { animation: none !important; }
+  .reveal-hidden { opacity: 1; transform: none; }
+  .lift:hover { transform: none; }
+}

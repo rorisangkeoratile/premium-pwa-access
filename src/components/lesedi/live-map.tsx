@@ -30,6 +30,8 @@ type LiveMapProps = {
   onSelect?: (id: string) => void;
   /** A road route to draw as a line, as [lat, lng] pairs. */
   route?: [number, number][] | null;
+  /** An affected area drawn as a shaded circle (used in place of an exact pin). */
+  area?: { lat: number; lng: number; radiusM: number } | null;
   /** Picker mode: a draggable pin the user can place by tapping the map. */
   pin?: { lat: number; lng: number } | null;
   pinAccuracy?: number | undefined;
@@ -74,7 +76,7 @@ export function crewMarkers(crews: { name: string; skill: string; status: string
   });
 }
 
-export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro", markers = [], heightClass = "h-[390px]", focus, onSelect, route, pin, pinAccuracy, onPin }: LiveMapProps) {
+export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro", markers = [], heightClass = "h-[390px]", focus, onSelect, route, area, pin, pinAccuracy, onPin }: LiveMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const lib = useRef<LeafletLib | null>(null);
   const map = useRef<LeafletMap | null>(null);
@@ -82,6 +84,7 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
   const pinMarker = useRef<Marker | null>(null);
   const pinCircle = useRef<Circle | null>(null);
   const routeLine = useRef<Polyline | null>(null);
+  const areaCircle = useRef<Circle | null>(null);
   const pinFromMap = useRef(false);
   const fitted = useRef(false);
   const onSelectRef = useRef(onSelect);
@@ -120,6 +123,7 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
       pinMarker.current = null;
       pinCircle.current = null;
       routeLine.current = null;
+      areaCircle.current = null;
       fitted.current = false;
       setReady(false);
     };
@@ -140,6 +144,18 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
       map.current.fitBounds(L.latLngBounds(markers.map((item) => [item.lat, item.lng] as [number, number])), { padding: [40, 40], maxZoom: 13 });
     }
   }, [ready, markers, pin]);
+
+  // Affected area, drawn as a circle so no one's exact address is revealed.
+  useEffect(() => {
+    const L = lib.current;
+    if (!ready || !L || !map.current) return;
+    areaCircle.current?.remove();
+    areaCircle.current = area ? L.circle([area.lat, area.lng], { radius: area.radiusM, className: "ll-area", weight: 2, fillOpacity: 0.15 }).addTo(map.current) : null;
+    if (area && !fitted.current) {
+      fitted.current = true;
+      map.current.fitBounds(areaCircle.current!.getBounds(), { padding: [30, 30] });
+    }
+  }, [ready, area?.lat, area?.lng, area?.radiusM]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Road route (e.g. technician to job), drawn under the markers.
   useEffect(() => {

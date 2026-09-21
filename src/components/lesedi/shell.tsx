@@ -1,11 +1,13 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Activity, Bell, LogOut, Zap } from "lucide-react";
+import { Activity, Bell, LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { type Priority } from "@/components/lesedi/data";
 import { currentUser, signOut } from "@/lib/auth";
+import { CountUp } from "@/components/lesedi/motion";
+import { Logo } from "@/components/lesedi/logo";
 
 export function DashboardShell({ user, role, home, children }: { user: string; role: string; home: string; children: ReactNode }) {
   const navigate = useNavigate();
@@ -31,10 +33,10 @@ export function DashboardShell({ user, role, home, children }: { user: string; r
   return (
     <div className="min-h-dvh bg-background">
       <a href="#workspace" className="sr-only z-50 bg-primary p-3 text-primary-foreground focus:not-sr-only focus:fixed focus:left-3 focus:top-3">Skip to workspace</a>
-      <header className="sticky top-0 z-40 border-b border-border bg-card">
+      <header className="sticky top-0 z-40 border-b border-border bg-card after:pointer-events-none after:absolute after:inset-x-0 after:bottom-[-1px] after:h-[2px] after:bg-[linear-gradient(90deg,transparent,oklch(0.55_0.15_250),oklch(0.72_0.19_46),transparent)] after:opacity-70">
         <div className="mx-auto grid h-16 max-w-[1600px] grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 lg:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="grid size-10 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground"><Zap className="size-5" aria-hidden="true" /></div>
+            <Logo />
             <div className="min-w-0">
               <p className="truncate text-[17px] font-extrabold text-navy">Lesedi<span className="text-primary">Link</span></p>
               <p className="hidden text-[11px] font-semibold uppercase text-muted-foreground sm:block">Municipal electricity response</p>
@@ -55,7 +57,7 @@ export function DashboardShell({ user, role, home, children }: { user: string; r
         {noticeOpen && <div className="absolute right-4 top-14 w-[min(360px,calc(100vw-2rem))] rounded-md border border-border bg-card p-4 shadow-xl"><p className="font-bold">3 new updates</p><p className="mt-2 text-sm text-muted-foreground">Critical outage #LL-4821 requires assignment.</p><Button className="mt-3 w-full" size="sm" onClick={() => setNoticeOpen(false)}>View updates</Button></div>}
       </header>
 
-      <main id="workspace" className="mx-auto min-w-0 max-w-[1600px] p-4 sm:p-6 lg:p-8">{children}</main>
+      <main id="workspace" className="page-enter mx-auto min-w-0 max-w-[1600px] p-4 sm:p-6 lg:p-8">{children}</main>
     </div>
   );
 }
@@ -65,7 +67,7 @@ export function PageHeading({ eyebrow, title, text, action }: { eyebrow: string;
 }
 
 export function Stat({ label, value, note, icon: Icon, alert = false }: { label: string; value: string; note: string; icon: typeof Activity; alert?: boolean }) {
-  return <div className="rounded-md border border-border bg-card p-4"><div className="flex items-start justify-between"><p className="text-xs font-bold text-muted-foreground">{label}</p><Icon className={`size-4 ${alert ? "text-destructive" : "text-primary"}`} /></div><p className="mt-2 text-2xl font-extrabold text-navy">{value}</p><p className="mt-1 text-[11px] text-muted-foreground">{note}</p></div>;
+  return <div className="lift rounded-md border border-border bg-soft-gradient p-4"><div className="flex items-start justify-between"><p className="text-xs font-bold text-muted-foreground">{label}</p><Icon className={`size-4 ${alert ? "text-destructive" : "text-primary"}`} /></div><p className="mt-2 text-2xl font-extrabold text-navy"><CountUp value={value} /></p><p className="mt-1 text-[11px] text-muted-foreground">{note}</p></div>;
 }
 
 export function PriorityBadge({ value }: { value: Priority }) {

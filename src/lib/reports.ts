@@ -37,7 +37,7 @@ export type CrewLocation = { lat: number; lng: number; accuracy: number; at: num
 export const reportStore = createStore<OutageReport[]>("lesedilink.reports", []);
 /** The resident's saved contact details, so they do not have to retype them for every report. */
 export type CustomerProfile = { fullName: string; phone: string; email: string; altPhone: string; account: string };
-export const profileStore = createStore<CustomerProfile>("lesedilink.customer-profile", { fullName: "", phone: "", email: "", altPhone: "", account: "" });
+export const profileStore = createStore<Record<string, CustomerProfile>>("lesedilink.customer-profiles", {});
 
 export const dispatchStore = createStore<Record<string, Dispatch>>("lesedilink.dispatches", {});
 export const crewStore = createStore<Record<string, CrewLocation>>("lesedilink.crews", {});
@@ -81,13 +81,19 @@ export function ago(timestamp: number) {
   return minutes < 1 ? "Just now" : minutes < 60 ? `${minutes} min` : `${Math.round(minutes / 60)} h`;
 }
 
-export function toIncident(report: OutageReport, linked = 0): Incident {
+/** More people affected than a single household raises the priority one level. */
+const order: Priority[] = ["Low", "Medium", "High", "Critical"];
+export const escalate = (priority: Priority, affected: number): Priority =>
+  affected >= 5 ? (order[Math.min(order.length - 1, order.indexOf(priority) + 1)] ?? priority) : priority;
+
+export function toIncident(report: OutageReport, linked = 0, followers = 0): Incident {
+  const affected = 1 + linked + followers;
   return {
     id: report.id,
     place: report.address || "Pinned location",
     detail: `${report.type} · ${report.description}`,
-    priority: priorityByType[report.type],
-    people: linked > 0 ? `${linked + 1} reports` : "1 report",
+    priority: escalate(priorityByType[report.type], affected),
+    people: `${affected} affected · ${linked + 1} report${linked === 0 ? "" : "s"}${followers > 0 ? ` · ${followers} following` : ""}`,
     age: ago(report.createdAt),
     lat: report.lat,
     lng: report.lng,

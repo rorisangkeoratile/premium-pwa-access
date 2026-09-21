@@ -1,20 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { Bell, Camera, Check, CheckCircle2, Clock3, FileText, Film, Image as ImageIcon, LocateFixed, Megaphone, X, Zap } from "lucide-react";
+import { Bell, BellOff, Camera, Check, CheckCircle2, Clock3, FileText, Film, Image as ImageIcon, LocateFixed, Megaphone, X, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { DashboardShell, Field, PageHeading, Stat } from "@/components/lesedi/shell";
-import { LiveMap, type MapMarker } from "@/components/lesedi/live-map";
-import { currentUser } from "@/lib/auth";
+import { LiveMap } from "@/components/lesedi/live-map";
+import { IncidentTracker } from "@/components/lesedi/incident-tracker";
+import { currentUser, type MockUser } from "@/lib/auth";
 import { detectPosition, reverseGeocode } from "@/lib/geo";
 import { MAX_PHOTOS, MAX_VIDEO_MB, compressPhoto } from "@/lib/media";
-import { technicians } from "@/components/lesedi/data";
 import { findDuplicate, type DuplicateMatch } from "@/lib/dedup";
-import { useRoute } from "@/lib/routing";
 import { ticketStore } from "@/lib/nodes";
-import { addReport, ago, crewStore, dispatchStore, nextReportId, outageTypes, profileStore, reportStore, setReportVideo, stageNames, type OutageReport, type OutageType } from "@/lib/reports";
+import { NEARBY_KM, follow, followStore, isFollowing, nearbyIncidents, publicIncidents, unfollow } from "@/lib/incidents";
+import { addReport, ago, dispatchStore, nextReportId, outageTypes, profileStore, reportStore, setReportVideo, type OutageReport, type OutageType } from "@/lib/reports";
 
 export const Route = createFileRoute("/dashboard/customer")({
   head: () => ({
@@ -29,8 +29,6 @@ export const Route = createFileRoute("/dashboard/customer")({
   }),
   component: CustomerDashboard,
 });
-
-const ME = "Lerato Sithole";
 
 type Details = { fullName: string; phone: string; email: string; altPhone: string; account: string; consent: boolean; saveDetails: boolean };
 type DetailErrors = { [K in "fullName" | "phone" | "email" | "altPhone" | "account" | "address" | "consent" | "description"]?: string | undefined };
@@ -56,11 +54,14 @@ function CustomerDashboard() {
   const reports = reportStore.use();
   const dispatches = dispatchStore.use();
   const tickets = ticketStore.use();
-  const crewLocations = crewStore.use();
-  const areaOutage = tickets.find((ticket) => ticket.areaId === "mamelodi" && !ticket.restoredAt);
+  const follows = followStore.use();
   const [submitted, setSubmitted] = useState<{ report: OutageReport; duplicate: DuplicateMatch | null } | null>(null);
 
-  const [details, setDetails] = useState<Details>({ fullName: ME, phone: "", email: "", altPhone: "", account: "", consent: false, saveDetails: true });
+  const [me, setMe] = useState<MockUser | null>(null);
+  useEffect(() => setMe(currentUser()), []);
+  const areaOutage = me?.areaId ? tickets.find((ticket) => ticket.areaId === me.areaId && !ticket.restoredAt) : undefined;
+
+  const [details, setDetails] = useState<Details>({ fullName: "", phone: "", email: "", altPhone: "", account: "", consent: false, saveDetails: true });
   const [description, setDescription] = useState("");
   const [outageType, setOutageType] = useState<OutageType>(outageTypes[0]);
   const [errors, setErrors] = useState<DetailErrors>({});
@@ -73,12 +74,16 @@ function CustomerDashboard() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [video, setVideo] = useState<{ file: File; url: string } | null>(null);
   const [mediaError, setMediaError] = useState("");
+  const [areaPoint, setAreaPoint] = useState<{ lat: number; lng: number } | null>(null);
+  const [areaChecking, setAreaChecking] = useState(false);
+  const [areaError, setAreaError] = useState("");
 
   // Fill in the saved details after mount (localStorage is not available while rendering on the server).
   useEffect(() => {
-    const saved = profileStore.get();
-    setDetails((current) => ({ ...current, fullName: saved.fullName || current.fullName, phone: saved.phone, email: saved.email, altPhone: saved.altPhone, account: saved.account }));
-  }, []);
+    if (!me) return;
+    const saved = profileStore.get()[me.email];
+    setDetails((current) => ({ ...current, fullName: saved?.fullName || me.name, phone: saved?.phone ?? "", email: saved?.email ?? "", altPhone: saved?.altPhone ?? "", account: saved?.account ?? "" }));
+  }, [me]);
 
   const setField = (key: keyof Details) => (event: ChangeEvent<HTMLInputElement>) => {
     const value = event.target.type === "checkbox" ? event.target.checked : event.target.value;
@@ -161,7 +166,7 @@ function CustomerDashboard() {
     const report: OutageReport = {
       id: nextReportId(),
       createdAt: Date.now(),
-      reporter: currentUser()?.name ?? ME,
+      reporter: me?.name ?? "Resident",
       address: address.trim(),
       fullName: details.fullName.trim(),
       email: details.email.trim() || undefined,
@@ -178,7 +183,7 @@ function CustomerDashboard() {
       duplicateOf: duplicate?.id,
     };
     if (video) setReportVideo(report.id, video.url);
-    if (details.saveDetails) profileStore.set({ fullName: report.fullName ?? ME, phone: report.contact, email: report.email ?? "", altPhone: report.altContact ?? "", account: report.account });
+    if (details.saveDetails && me) profileStore.set({ ...profileStore.get(), [me.email]: { fullName: report.fullName ?? me.name, phone: report.contact, email: report.email ?? "", altPhone: report.altContact ?? "", account: report.account } });
     addReport(report);
     setSubmitted({ report, duplicate });
     setPin(null);
@@ -192,68 +197,79 @@ function CustomerDashboard() {
     addressTouched.current = false;
   }
 
-  // Everything below follows the customer's own latest report, or the incident it was merged into.
-  const mine = reports.filter((report) => report.reporter === ME);
+  // The public view of every open incident. It carries no personal details, so it is safe to show
+  // to a neighbour who is affected by the same fault.
+  const resident = me?.email ?? "resident";
+  const publicList = useMemo(() => publicIncidents(reports, tickets, dispatches, follows), [reports, tickets, dispatches, follows]);
+
+  const mine = me ? reports.filter((report) => report.reporter === me.name) : [];
   const latest = mine[0];
   const masterId = latest ? (latest.duplicateOf ?? latest.id) : undefined;
-  const trackingDispatch = masterId ? dispatches[masterId] : undefined;
-  const trackingStage = trackingDispatch ? (trackingDispatch.stage ?? -1) : -2; // -2: no technician assigned yet
-  const destination = useMemo(() => {
-    const place = reports.find((item) => item.id === masterId) ?? tickets.find((item) => item.id === masterId);
-    return place ? { lat: place.lat, lng: place.lng } : null;
-  }, [reports, tickets, masterId]);
-  const techPosition = trackingDispatch ? (crewLocations[trackingDispatch.tech] ?? technicians.find((tech) => tech.name === trackingDispatch.tech) ?? null) : null;
-  const tracking = trackingDispatch !== undefined && trackingStage < 4;
-  const trackingRoute = useRoute(tracking && techPosition ? { lat: techPosition.lat, lng: techPosition.lng } : null, tracking ? destination : null);
-  const trackingMarkers = useMemo<MapMarker[]>(() => {
-    if (!tracking || !techPosition || !destination) return [];
-    return [
-      { id: "you", lat: destination.lat, lng: destination.lng, kind: "incident", label: "Your outage", detail: "Where your technician is heading" },
-      { id: "tech", lat: techPosition.lat, lng: techPosition.lng, kind: "crew", label: trackingDispatch?.tech ?? "Technician", detail: trackingRoute ? `About ${trackingRoute.minutes} min away` : "On the way" },
-    ];
-  }, [tracking, techPosition?.lat, techPosition?.lng, destination, trackingDispatch?.tech, trackingRoute?.minutes]); // eslint-disable-line react-hooks/exhaustive-deps
+  const myIncident = publicList.find((incident) => incident.id === masterId);
+  // The exact location is shown only to the person who filed that report; a merged report follows
+  // someone else's incident, so it gets the same area-level view as any other follower.
+  const ownPoint = latest && !latest.duplicateOf ? { lat: latest.lat, lng: latest.lng } : undefined;
+  const followed = publicList.filter((incident) => incident.id !== masterId && isFollowing(incident.id, resident, follows));
+  const nearby = areaPoint ? nearbyIncidents(publicList, areaPoint) : [];
+
+  async function checkArea() {
+    setAreaChecking(true);
+    setAreaError("");
+    try {
+      const fix = await detectPosition();
+      setAreaPoint({ lat: fix.lat, lng: fix.lng });
+    } catch (error) {
+      setAreaError((error as Error).message);
+    } finally {
+      setAreaChecking(false);
+    }
+  }
 
   // Which step of the timeline is current, driven by the technician's updates.
-  const currentStep = !latest ? 2 : trackingStage === -2 ? 1 : trackingStage <= 1 ? 2 : trackingStage === 2 ? 3 : trackingStage === 3 ? 4 : 6;
-  const stepNote = !latest ? "Thabo is 4.8 km away"
-    : trackingStage === -2 ? "Waiting for a crew to be assigned"
-    : trackingStage < 0 ? `${trackingDispatch?.tech} has been assigned and will accept shortly`
-    : trackingStage === 0 ? `${trackingDispatch?.tech} accepted the job and is getting ready`
-    : trackingStage === 1 ? (trackingRoute ? `${trackingDispatch?.tech} is on the way · about ${trackingRoute.minutes} min` : `${trackingDispatch?.tech} is on the way`)
-    : trackingStage === 2 ? `${trackingDispatch?.tech} has arrived`
-    : `${trackingDispatch?.tech} is working on the fault`;
+  const myStage = myIncident ? myIncident.stage : -2;
+  const currentStep = !latest ? 2 : myStage === -2 ? 1 : myStage <= 1 ? 2 : myStage === 2 ? 3 : myStage === 3 ? 4 : 6;
+  const stepNote = !latest ? "Thabo is 4.8 km away" : (myIncident?.status ?? "Waiting for a crew to be assigned");
 
   return (
-    <DashboardShell home="/dashboard/customer" user="Lerato Sithole" role="Resident · Mamelodi East">
+    <DashboardShell home="/dashboard/customer" user={me?.name ?? "Resident"} role={`Resident · ${me?.area ?? "Tshwane"}`}>
       <PageHeading eyebrow="Customer" title="My power" text="Report a fault, follow the repair and stay ahead of planned interruptions." action={<Button asChild size="lg" className="min-h-12"><a href="#report-form"><Megaphone /> Report an outage</a></Button>} />
 
-      {trackingDispatch && trackingStage < 4 && (
-        <section className="mt-5 rounded-md border border-border bg-card" aria-labelledby="tracking-title">
-          <div className="border-b border-border p-4">
-            <h2 id="tracking-title" className="font-extrabold text-navy">Live technician tracking</h2>
-            <p className="text-xs text-muted-foreground">{trackingDispatch.tech} is assigned to your report {latest?.id}{latest?.duplicateOf ? ` (merged into ${latest.duplicateOf})` : ""}.</p>
+      <section className="mt-5 rounded-md border border-border bg-card p-4" aria-labelledby="area-title">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="max-w-2xl">
+            <h2 id="area-title" className="font-extrabold text-navy">Power out in your area?</h2>
+            <p className="mt-1 text-xs text-muted-foreground">If a neighbour has already reported the same fault, follow that outage to get the same live progress and technician tracking. You do not have to report it again, and we never show you who reported it.</p>
           </div>
-          <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,.8fr)]">
-            <LiveMap title="TECHNICIAN LIVE LOCATION" subtitle={trackingStage >= 2 ? "Your technician has arrived" : trackingRoute ? `About ${trackingRoute.minutes} min away` : "Finding the route…"} markers={trackingMarkers} route={trackingStage >= 2 ? null : (trackingRoute?.coords ?? null)} heightClass="h-80" />
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-md bg-secondary p-3"><p className="text-[10px] font-extrabold uppercase text-muted-foreground">Arrival</p><p className="mt-1 text-xl font-extrabold text-navy">{trackingStage >= 2 ? "On site" : trackingRoute ? `${trackingRoute.minutes} min` : "…"}</p></div>
-                <div className="rounded-md bg-secondary p-3"><p className="text-[10px] font-extrabold uppercase text-muted-foreground">Distance</p><p className="mt-1 text-xl font-extrabold text-navy">{trackingStage >= 2 ? "0 km" : trackingRoute ? `${trackingRoute.distanceKm.toFixed(1)} km` : "…"}</p></div>
-              </div>
-              <div className="rounded-md border border-border p-3">
-                <p className="text-sm font-extrabold text-navy">Live updates</p>
-                <ol className="mt-2 max-h-48 space-y-2 overflow-y-auto border-l border-border pl-3">
-                  {[...(trackingDispatch.updates ?? [])].reverse().map((update, index) => (
-                    <li key={index} className="text-xs"><p className="font-bold">{update.stage < 0 ? "Technician assigned" : stageNames[update.stage]} <span className="font-normal text-muted-foreground">· {ago(update.at)} ago</span></p>{update.note && <p className="text-muted-foreground">{update.note}</p>}</li>
-                  ))}
-                </ol>
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
+          <Button variant="outline" className="min-h-11" onClick={checkArea} disabled={areaChecking}><LocateFixed />{areaChecking ? "Checking…" : "Check my area"}</Button>
+        </div>
+        {areaError && <p role="alert" className="mt-3 text-sm font-bold text-destructive">{areaError}</p>}
+        {areaPoint && (nearby.length === 0 ? (
+          <p className="mt-3 rounded-md bg-secondary p-3 text-sm">No open outages within {NEARBY_KM} km of you. If your power is off, <a className="font-bold text-primary underline" href="#report-form">report it</a>.</p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {nearby.map((incident) => {
+              const following = isFollowing(incident.id, resident, follows);
+              return (
+                <li key={incident.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3">
+                  <div className="min-w-0">
+                    <p className="font-bold text-navy">{incident.area}{incident.source === "auto" ? " · detected by our sensors" : ""}</p>
+                    <p className="text-xs text-muted-foreground">{incident.status} · {incident.reports + incident.followers} affected · reported {ago(incident.openedAt)} ago</p>
+                  </div>
+                  {incident.id === masterId
+                    ? <span className="text-xs font-bold text-primary">This is your report</span>
+                    : <Button size="sm" variant={following ? "outline" : "default"} className="min-h-11" onClick={() => (following ? unfollow(incident.id, resident) : follow(incident.id, resident))}>{following ? <><BellOff /> Unfollow</> : <><Bell /> Follow this outage</>}</Button>}
+                </li>
+              );
+            })}
+          </ul>
+        ))}
+      </section>
 
-      <section className="mt-5 overflow-hidden rounded-md border border-border bg-navy text-primary-foreground" aria-labelledby="existing-title">
+      {myIncident && <div className="mt-5"><IncidentTracker incident={myIncident} own={Boolean(ownPoint)} point={ownPoint} /></div>}
+      {followed.map((incident) => <div key={incident.id} className="mt-5"><IncidentTracker incident={incident} onUnfollow={() => unfollow(incident.id, resident)} /></div>)}
+
+      {latest && (
+      <section className="mt-5 overflow-hidden rounded-md border border-border bg-navy-gradient text-primary-foreground" aria-labelledby="existing-title">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 pt-4">
           <p className="text-[10px] font-extrabold uppercase text-primary-foreground/60">Existing report</p>
           <p className="min-w-0 truncate text-xs text-primary-foreground/60">{latest ? `${latest.address || "Pinned location"}${latest.duplicateOf ? ` · merged into ${latest.duplicateOf}` : ""}` : "Mamelodi East"}</p>
@@ -269,6 +285,7 @@ function CustomerDashboard() {
           ))}
         </ol>
       </section>
+      )}
 
       <div className="mt-5">
         {submitted ? (
@@ -362,7 +379,7 @@ function CustomerDashboard() {
 
       <section className="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Account summary">
         <Stat label="Supply status" value="Restored" note="Since 04:12 today" icon={Zap} />
-        <Stat label="Open reports" value={String(1 + mine.length)} note={`${latest ? latest.id : "#LL-4792"} in progress`} icon={FileText} />
+        <Stat label="Open reports" value={String((me?.seedHistory ? 1 : 0) + mine.length)} note={latest ? `${latest.id} in progress` : me?.seedHistory ? "#LL-4792 in progress" : "No open reports"} icon={FileText} />
         <Stat label="Next planned outage" value="Thu 09:00" note="Maintenance · 3 hours" icon={Clock3} />
         <Stat label="Area alerts" value="2" note="Tap to review notices" icon={Bell} />
       </section>
@@ -371,7 +388,7 @@ function CustomerDashboard() {
         <section className="rounded-md border border-border bg-card p-5">
           <h2 className="font-extrabold text-navy">Notices for your area</h2>
           <div className="mt-4 space-y-3">
-            {[...(areaOutage ? [["Outage in your area", `Detected automatically ${ago(areaOutage.openedAt)} ago. A crew is being arranged, no report needed.`]] : []), ["Planned maintenance", "Thursday 09:00 – 12:00 · Mamelodi East feeder"], ["Load reduction", "Evening peak 18:00 – 20:00 · Stage 2"]].map(([title, text]) => (
+            {[...(areaOutage ? [["Outage in your area", `Detected automatically ${ago(areaOutage.openedAt)} ago. A crew is being arranged, no report needed.`]] : []), ["Planned maintenance", `Thursday 09:00 – 12:00 · ${me?.area ?? "Your area"} feeder`], ["Load reduction", "Evening peak 18:00 – 20:00 · Stage 2"]].map(([title, text]) => (
               <div key={title} className="rounded-md border border-border bg-secondary p-4"><p className="text-sm font-bold">{title}</p><p className="text-xs text-muted-foreground">{text}</p></div>
             ))}
           </div>
@@ -379,7 +396,7 @@ function CustomerDashboard() {
         <section className="rounded-md border border-border bg-card p-5">
           <h2 className="font-extrabold text-navy">My report history</h2>
           <div className="mt-3 divide-y divide-border">
-            {[...mine.map((item) => [item.id, item.type, dispatches[item.duplicateOf ?? item.id]?.stage === 4 ? "Resolved" : item.duplicateOf ? "Merged · in progress" : "In progress"]), ["#LL-4792", "Total blackout", "In progress"], ["#LL-4610", "Partial outage", "Resolved in 2h 10m"], ["#LL-4388", "Equipment damage", "Resolved in 5h 40m"]].map(([id, type, status]) => (
+            {[...mine.map((item) => [item.id, item.type, dispatches[item.duplicateOf ?? item.id]?.stage === 4 ? "Resolved" : item.duplicateOf ? "Merged · in progress" : "In progress"]), ...(me?.seedHistory ? [["#LL-4792", "Total blackout", "In progress"], ["#LL-4610", "Partial outage", "Resolved in 2h 10m"], ["#LL-4388", "Equipment damage", "Resolved in 5h 40m"]] : [])].map(([id, type, status]) => (
               <div key={id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3">
                 <div className="min-w-0"><p className="truncate text-sm font-bold">{type}</p><p className="text-xs text-muted-foreground">{id}</p></div>
                 <span className="text-xs font-bold text-primary">{status}</span>

@@ -12,6 +12,7 @@ import { distanceKm } from "@/lib/geo";
 import { JobFeed, LinkedReports } from "@/components/lesedi/job-progress";
 import { assignJob, crewStore, dispatchStore, reportStore, stageNames, toIncident } from "@/lib/reports";
 import { statusStore, ticketStore, ticketToIncident, useNodeEngine } from "@/lib/nodes";
+import { followStore, followerCount } from "@/lib/incidents";
 
 export const Route = createFileRoute("/dashboard/dispatcher")({
   head: () => ({
@@ -36,6 +37,7 @@ function DispatcherDashboard() {
   const crewLocations = crewStore.use();
   const tickets = ticketStore.use();
   const nodeStatus = statusStore.use();
+  const follows = followStore.use();
   useNodeEngine();
 
   // Auto-detected outages (from silent sensor nodes) and citizen reports (with their GPS pin and media) join the seeded incidents in one queue.
@@ -43,8 +45,8 @@ function DispatcherDashboard() {
   // Duplicates are merged: only master reports enter the queue, with a count of the reports linked to them.
   const openReports = useMemo(() => reports.filter((item) => !item.duplicateOf && dispatches[item.id]?.stage !== 4), [reports, dispatches]);
   const allIncidents = useMemo(
-    () => [...openTickets.map(ticketToIncident), ...openReports.map((item) => toIncident(item, reports.filter((other) => other.duplicateOf === item.id).length)), ...incidents],
-    [openTickets, openReports, reports],
+    () => [...openTickets.map(ticketToIncident), ...openReports.map((item) => toIncident(item, reports.filter((other) => other.duplicateOf === item.id).length, followerCount(item.id, follows))), ...incidents],
+    [openTickets, openReports, reports, follows],
   );
   const filtered = useMemo(() => filter === "All" ? allIncidents : allIncidents.filter((item) => item.priority === filter), [filter, allIncidents]);
   const selected = allIncidents.find((item) => item.id === selectedId) ?? primaryIncident;
@@ -92,7 +94,7 @@ function DispatcherDashboard() {
                 <div className="flex items-center justify-between gap-2"><PriorityBadge value={incident.priority} /><span className="text-[11px] font-bold text-muted-foreground">{incident.age}</span></div>
                 <p className="mt-2 font-extrabold text-navy">{incident.place}</p>
                 <p className="text-xs text-muted-foreground">{incident.detail}</p>
-                <div className="mt-2 flex items-center justify-between text-xs"><span><Users className="mr-1 inline size-3" />{incident.people} affected</span><span className="font-bold text-primary">{dispatches[incident.id] ? `${dispatches[incident.id]?.tech.split(" ")[0]} · ${(dispatches[incident.id]?.stage ?? -1) < 0 ? "Assigned" : stageNames[dispatches[incident.id]?.stage ?? 0]} · ` : ""}{incident.id}{incident.source === "citizen" && " · Citizen report"}{incident.source === "auto" && " · Auto-detected"}</span></div>
+                <div className="mt-2 flex items-center justify-between text-xs"><span><Users className="mr-1 inline size-3" />{incident.people}</span><span className="font-bold text-primary">{dispatches[incident.id] ? `${dispatches[incident.id]?.tech.split(" ")[0]} · ${(dispatches[incident.id]?.stage ?? -1) < 0 ? "Assigned" : stageNames[dispatches[incident.id]?.stage ?? 0]} · ` : ""}{incident.id}{incident.source === "citizen" && " · Citizen report"}{incident.source === "auto" && " · Auto-detected"}</span></div>
               </button>
             ))}
           </div>
@@ -107,7 +109,7 @@ function DispatcherDashboard() {
             <div>
               <p className="text-[10px] font-extrabold uppercase text-destructive">Immediate assignment</p>
               <h2 className="mt-1 text-xl font-extrabold text-navy">{selected.place}</h2>
-              <p className="text-sm text-muted-foreground">{selected.id} · {selected.people} consumers affected</p>
+              <p className="text-sm text-muted-foreground">{selected.id} · {selected.people}</p>
             </div>
             <PriorityBadge value={selected.priority} />
           </div>
@@ -126,7 +128,7 @@ function DispatcherDashboard() {
         </section>
 
         <div className="space-y-5">
-          <section className="rounded-md border border-border bg-navy p-5 text-primary-foreground">
+          <section className="rounded-md border border-border bg-navy-gradient p-5 text-primary-foreground">
             <div className="flex items-center justify-between">
               <div><p className="text-[10px] font-extrabold uppercase text-primary-foreground/60">Service target</p><h2 className="mt-1 text-lg font-extrabold">Restore power safely, faster</h2></div>
               <Gauge className="size-7 text-accent" />

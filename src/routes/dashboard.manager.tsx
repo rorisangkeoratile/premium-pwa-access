@@ -28,7 +28,7 @@ function ManagerDashboard() {
   const reports = reportStore.use();
   const crewLocations = crewStore.use();
   const tickets = ticketStore.use();
-  const markers = useMemo(() => [...incidentMarkers([...tickets.filter((ticket) => !ticket.restoredAt).map(ticketToIncident), ...reports.map(toIncident), ...incidents]), ...crewMarkers(technicians, crewLocations)], [reports, tickets, crewLocations]);
+  const markers = useMemo(() => [...incidentMarkers([...tickets.filter((ticket) => !ticket.restoredAt).map(ticketToIncident), ...reports.map((report) => toIncident(report)), ...incidents]), ...crewMarkers(technicians, crewLocations)], [reports, tickets, crewLocations]);
 
   return (
     <DashboardShell home="/dashboard/manager" user="Kagiso Phiri" role="Department manager · Energy & Electricity">
