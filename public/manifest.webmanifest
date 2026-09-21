@@ -1,7 +1,7 @@
 {
-  "name": "GridGuard Tshwane",
-  "short_name": "GridGuard",
-  "description": "Real-time outage coordination for the City of Tshwane.",
+  "name": "LesediLink",
+  "short_name": "LesediLink",
+  "description": "Real-time electricity outage reporting, dispatch and oversight for the City of Tshwane.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
