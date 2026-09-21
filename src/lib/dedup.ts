@@ -2,8 +2,14 @@ import { distanceKm } from "@/lib/geo";
 import type { AutoTicket } from "@/lib/nodes";
 import type { Dispatch, OutageReport } from "@/lib/reports";
 
-/** A new report this close to an open citizen report is treated as the same fault. */
-export const REPORT_RADIUS_KM = 0.25;
+/**
+ * A new report this close to an open citizen report is treated as the same fault.
+ * 40 m is tuned for a live demonstration: two reports from the same street corner or the same house
+ * merge, while a report a block away does not. A real deployment would widen it (around 150–250 m),
+ * because phone GPS is often only accurate to 10–30 m outdoors and worse indoors.
+ */
+export const REPORT_RADIUS_KM = 0.04;
+
 /** A new report this close to an area's centre while a node-detected outage is open joins that outage. */
 export const TICKET_RADIUS_KM = 3;
 
