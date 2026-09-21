@@ -10,33 +10,89 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DashboardCustomerRouteImport } from './routes/dashboard.customer'
+import { Route as DashboardDispatcherRouteImport } from './routes/dashboard.dispatcher'
+import { Route as DashboardManagerRouteImport } from './routes/dashboard.manager'
+import { Route as DashboardTechnicianRouteImport } from './routes/dashboard.technician'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DashboardCustomerRoute = DashboardCustomerRouteImport.update({
+  id: '/dashboard/customer',
+  path: '/dashboard/customer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardDispatcherRoute = DashboardDispatcherRouteImport.update({
+  id: '/dashboard/dispatcher',
+  path: '/dashboard/dispatcher',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardManagerRoute = DashboardManagerRouteImport.update({
+  id: '/dashboard/manager',
+  path: '/dashboard/manager',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardTechnicianRoute = DashboardTechnicianRouteImport.update({
+  id: '/dashboard/technician',
+  path: '/dashboard/technician',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/dashboard/customer': typeof DashboardCustomerRoute
+  '/dashboard/dispatcher': typeof DashboardDispatcherRoute
+  '/dashboard/manager': typeof DashboardManagerRoute
+  '/dashboard/technician': typeof DashboardTechnicianRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/dashboard/customer': typeof DashboardCustomerRoute
+  '/dashboard/dispatcher': typeof DashboardDispatcherRoute
+  '/dashboard/manager': typeof DashboardManagerRoute
+  '/dashboard/technician': typeof DashboardTechnicianRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/dashboard/customer': typeof DashboardCustomerRoute
+  '/dashboard/dispatcher': typeof DashboardDispatcherRoute
+  '/dashboard/manager': typeof DashboardManagerRoute
+  '/dashboard/technician': typeof DashboardTechnicianRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/dashboard/customer'
+    | '/dashboard/dispatcher'
+    | '/dashboard/manager'
+    | '/dashboard/technician'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/dashboard/customer'
+    | '/dashboard/dispatcher'
+    | '/dashboard/manager'
+    | '/dashboard/technician'
+  id:
+    | '__root__'
+    | '/'
+    | '/dashboard/customer'
+    | '/dashboard/dispatcher'
+    | '/dashboard/manager'
+    | '/dashboard/technician'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DashboardCustomerRoute: typeof DashboardCustomerRoute
+  DashboardDispatcherRoute: typeof DashboardDispatcherRoute
+  DashboardManagerRoute: typeof DashboardManagerRoute
+  DashboardTechnicianRoute: typeof DashboardTechnicianRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +104,43 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dashboard/customer': {
+      id: '/dashboard/customer'
+      path: '/dashboard/customer'
+      fullPath: '/dashboard/customer'
+      preLoaderRoute: typeof DashboardCustomerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard/dispatcher': {
+      id: '/dashboard/dispatcher'
+      path: '/dashboard/dispatcher'
+      fullPath: '/dashboard/dispatcher'
+      preLoaderRoute: typeof DashboardDispatcherRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard/manager': {
+      id: '/dashboard/manager'
+      path: '/dashboard/manager'
+      fullPath: '/dashboard/manager'
+      preLoaderRoute: typeof DashboardManagerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard/technician': {
+      id: '/dashboard/technician'
+      path: '/dashboard/technician'
+      fullPath: '/dashboard/technician'
+      preLoaderRoute: typeof DashboardTechnicianRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DashboardCustomerRoute: DashboardCustomerRoute,
+  DashboardDispatcherRoute: DashboardDispatcherRoute,
+  DashboardManagerRoute: DashboardManagerRoute,
+  DashboardTechnicianRoute: DashboardTechnicianRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
