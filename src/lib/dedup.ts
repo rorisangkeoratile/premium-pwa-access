@@ -1,6 +1,6 @@
 import { distanceKm } from "@/lib/geo";
 import type { AutoTicket } from "@/lib/nodes";
-import type { Dispatch, OutageReport } from "@/lib/reports";
+import { isHomeOutage, type Dispatch, type OutageReport, type OutageType } from "@/lib/reports";
 
 /**
  * A new report this close to an open citizen report is treated as the same fault.
@@ -19,20 +19,27 @@ export type DuplicateMatch = { id: string; kind: "report" | "auto"; label: strin
  * Deduplication: before a report is stored, look for an open incident that already covers it.
  * Auto-detected outages take precedence (they cover a whole area); otherwise the nearest open citizen report wins.
  * Only master incidents are candidates, so duplicates never chain onto each other.
+ *
+ * A home outage is a fault at one property ("neighbours still have power"), so it never merges into an
+ * area outage, and a home report never becomes the master that other reports merge into. Pass the type
+ * of the report being filed, or leave it out while the resident has not chosen yet.
  */
 export function findDuplicate(
   point: { lat: number; lng: number },
   reports: OutageReport[],
   tickets: AutoTicket[],
   dispatches: Record<string, Dispatch>,
+  type?: OutageType | null,
 ): DuplicateMatch | null {
+  if (type && isHomeOutage({ type })) return null;
+
   const ticket = tickets
     .filter((item) => !item.restoredAt && distanceKm(point, item) <= TICKET_RADIUS_KM)
     .sort((a, b) => distanceKm(point, a) - distanceKm(point, b))[0];
   if (ticket) return { id: ticket.id, kind: "auto", label: `${ticket.areaName} outage detected by our sensors` };
 
   const report = reports
-    .filter((item) => !item.duplicateOf && dispatches[item.id]?.stage !== 4 && distanceKm(point, item) <= REPORT_RADIUS_KM)
+    .filter((item) => !isHomeOutage(item) && !item.duplicateOf && dispatches[item.id]?.stage !== 4 && distanceKm(point, item) <= REPORT_RADIUS_KM)
     .sort((a, b) => distanceKm(point, a) - distanceKm(point, b))[0];
   if (report) return { id: report.id, kind: "report", label: `Report ${report.id} nearby` };
 

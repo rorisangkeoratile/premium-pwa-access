@@ -22,6 +22,13 @@ export const Route = createFileRoute("/login")({
 
 const roleIcons = { Customer: Home, Technician: Wrench, Dispatcher: Headphones, "Department manager": Building2 } as const;
 
+const quickGroups = [
+  { title: "Residents", role: "Customer" },
+  { title: "Field technicians", role: "Technician" },
+  { title: "Dispatchers", role: "Dispatcher" },
+  { title: "Department manager", role: "Department manager" },
+] as const;
+
 function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
@@ -104,19 +111,24 @@ function LoginPage() {
             </form>
 
             {QUICK_LOGIN_ENABLED && (
-              <section className="mt-6" aria-labelledby="quick-login-heading">
+              <section className="mt-6 space-y-5" aria-labelledby="quick-login-heading">
                 <h2 id="quick-login-heading" className="text-[11px] font-extrabold uppercase text-muted-foreground">Quick tap login</h2>
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  {mockUsers.map((user) => {
-                    const Icon = roleIcons[user.role];
-                    return (
-                      <Button key={user.email} type="button" variant="outline" className="h-auto min-h-14 justify-start gap-3 px-3 py-2 text-left" onClick={() => quickLogin(user)}>
-                        <Icon className="size-5 shrink-0 text-primary" aria-hidden="true" />
-                        <span className="min-w-0"><span className="block text-sm font-bold">{user.role}</span><span className="block truncate text-[11px] font-normal text-muted-foreground">{user.name}</span></span>
-                      </Button>
-                    );
-                  })}
-                </div>
+                {quickGroups.map((group) => (
+                  <div key={group.title}>
+                    <h3 className="text-xs font-extrabold text-navy">{group.title}</h3>
+                    <div className="mt-2 grid grid-cols-2 gap-3">
+                      {mockUsers.filter((user) => user.role === group.role).map((user) => {
+                        const Icon = roleIcons[user.role];
+                        return (
+                          <Button key={user.email} type="button" variant="outline" className="h-auto min-h-14 justify-start gap-3 px-3 py-2 text-left" onClick={() => quickLogin(user)}>
+                            <Icon className="size-5 shrink-0 text-primary" aria-hidden="true" />
+                            <span className="min-w-0"><span className="block truncate text-sm font-bold">{user.name}</span><span className="block truncate text-[11px] font-normal text-muted-foreground">{user.area ?? user.title ?? user.role}</span></span>
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </section>
             )}
           </>

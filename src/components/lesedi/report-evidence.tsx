@@ -1,6 +1,6 @@
 import { Film, MapPinned, Navigation } from "lucide-react";
 
-import { directionsLink, getReportVideo, osmLink, type OutageReport } from "@/lib/reports";
+import { directionsLink, getReportVideo, isHomeOutage, osmLink, type OutageReport } from "@/lib/reports";
 
 /** Location, photos and video a citizen attached to an outage report. */
 export function ReportEvidence({ report }: { report: OutageReport }) {
@@ -10,6 +10,7 @@ export function ReportEvidence({ report }: { report: OutageReport }) {
       <div className="rounded-md bg-secondary p-3">
         <p className="text-[10px] font-extrabold uppercase text-muted-foreground">Reported location</p>
         <p className="mt-1 font-bold text-navy">{report.address || "Pinned on map"}</p>
+        {report.landmark && <p className="text-xs text-muted-foreground">Landmark: {report.landmark}</p>}
         <p className="text-xs text-muted-foreground">
           {report.accuracy ? `GPS detected · accurate to about ${Math.round(report.accuracy)} m` : "Pin placed on the map by the resident"}
         </p>
@@ -19,8 +20,9 @@ export function ReportEvidence({ report }: { report: OutageReport }) {
         </div>
       </div>
       <p className="text-xs text-muted-foreground">
-        {report.fullName ?? report.reporter} · {report.contact}{report.altContact ? ` / ${report.altContact}` : ""}{report.email ? ` · ${report.email}` : ""} · Account {report.account}
+        {report.reporter} · {report.contact}{report.account ? ` · Meter or account ${report.account}` : ""}
       </p>
+      {isHomeOutage(report) && <p className="rounded-md bg-secondary p-3 text-xs"><strong>Home visit.</strong> The technician may need to be let in, so the resident gets a Visit PIN to read out at the gate.</p>}
       {report.photos.length > 0 && (
         <div className="grid grid-cols-3 gap-2">
           {report.photos.map((src, index) => (

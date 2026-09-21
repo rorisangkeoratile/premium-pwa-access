@@ -1,7 +1,7 @@
-import { incidents as seedIncidents, seedStatus, type Priority } from "@/components/lesedi/data";
+import type { Priority } from "@/components/lesedi/data";
 import { distanceKm } from "@/lib/geo";
 import type { AutoTicket } from "@/lib/nodes";
-import { stageNames, type Dispatch, type OutageReport } from "@/lib/reports";
+import { isHomeOutage, stageNames, type Dispatch, type OutageReport } from "@/lib/reports";
 import { createStore } from "@/lib/store";
 
 /**
@@ -21,6 +21,8 @@ export const AREA_CELL = 0.005; // roughly 500 m
 export const AREA_RADIUS_M = 500;
 /** How far from a resident we look for outages they may be affected by. */
 export const NEARBY_KM = 3;
+/** A resident is told about outages this close to the centre of their home area, wherever they are right now. */
+export const HOME_AREA_KM = NEARBY_KM;
 
 const snap = (value: number) => Math.round(value / AREA_CELL) * AREA_CELL;
 
@@ -55,13 +57,21 @@ export type PublicIncident = {
   techName?: string | undefined;
   /** First name, the only part shown to residents. */
   techFirst?: string | undefined;
-  /** The crew's live position is shared only while they are driving to the job. */
+  /** The crew's live position is shared from the moment they accept until the job is finished. */
   techVisible: boolean;
+  /** True only while they are driving, when a route and an ETA are worth drawing. */
+  techEnRoute: boolean;
   /** Stage changes only. The technician's free-text notes stay on the staff dashboards. */
   updates: PublicUpdate[];
   reports: number;
   followers: number;
   source: "citizen" | "auto";
+  /** A fault at one property. The resident who reported it can track it, but it is never offered to neighbours to follow. */
+  home: boolean;
+  /** The sensor-network area, for outages the sensors detected. */
+  areaId?: string | undefined;
+  /** When it was resolved: a repair finished (reports) or the sensors saw power return (sensor outages). */
+  closedAt?: number | undefined;
 };
 
 function statusLine(stage: number, first: string | undefined): string {
@@ -74,7 +84,7 @@ function statusLine(stage: number, first: string | undefined): string {
   return "Power restored";
 }
 
-function base(id: string, area: string, lat: number, lng: number, openedAt: number, dispatch: Dispatch | undefined, reports: number, followers: number, source: "citizen" | "auto"): PublicIncident {
+function base(id: string, area: string, lat: number, lng: number, openedAt: number, dispatch: Dispatch | undefined, reports: number, followers: number, source: "citizen" | "auto", home = false): PublicIncident {
   const stage = dispatch ? (dispatch.stage ?? -1) : -2;
   const first = dispatch?.tech.split(" ")[0];
   return {
@@ -87,11 +97,15 @@ function base(id: string, area: string, lat: number, lng: number, openedAt: numb
     stage,
     status: statusLine(stage, first),
     ...(dispatch ? { techName: dispatch.tech, techFirst: first } : {}),
-    techVisible: stage === 1,
+    // Residents asked to see the crew all the way through, not just while driving. The position is the
+    // crew's own device, which is theirs to share, and it stops the moment the job is closed.
+    techVisible: stage >= 0 && stage <= 3,
+    techEnRoute: stage === 1,
     updates: (dispatch?.updates ?? []).map((update) => ({ stage: update.stage, at: update.at })),
     reports,
     followers,
     source,
+    home,
   };
 }
 
@@ -109,38 +123,53 @@ export function unfollow(id: string, resident: string) {
   followStore.set({ ...all, [id]: (all[id] ?? []).filter((item) => item !== resident) });
 }
 
-/** Every incident a resident may follow: open citizen reports (masters only) and open node-detected outages. */
-export function publicIncidents(
+/**
+ * Every incident in its public form, open or closed. Closed ones are kept so residents can be told
+ * "power restored", which is the alert they most want to receive.
+ */
+export function publicHistory(
   reports: OutageReport[],
   tickets: AutoTicket[],
   dispatches: Record<string, Dispatch>,
   follows: Record<string, string[]>,
 ): PublicIncident[] {
   const fromReports = reports
-    .filter((report) => !report.duplicateOf && dispatches[report.id]?.stage !== 4)
-    .map((report) =>
-      base(
-        report.id,
-        areaLabel(report.address),
-        report.lat,
-        report.lng,
-        report.createdAt,
-        dispatches[report.id],
-        1 + reports.filter((other) => other.duplicateOf === report.id).length,
-        followerCount(report.id, follows),
-        "citizen",
-      ),
-    );
+    .filter((report) => !report.duplicateOf)
+    .map((report) => {
+      const dispatch = dispatches[report.id];
+      const closedAt = dispatch?.stage === 4 ? ((dispatch.updates ?? []).filter((update) => update.stage === 4).at(-1)?.at ?? dispatch.at) : undefined;
+      return {
+        ...base(
+          report.id,
+          areaLabel(report.address),
+          report.lat,
+          report.lng,
+          report.createdAt,
+          dispatch,
+          1 + reports.filter((other) => other.duplicateOf === report.id).length,
+          followerCount(report.id, follows),
+          "citizen",
+          isHomeOutage(report),
+        ),
+        ...(closedAt !== undefined ? { closedAt } : {}),
+      };
+    });
 
-  const fromTickets = tickets
-    .filter((ticket) => !ticket.restoredAt)
-    .map((ticket) => base(ticket.id, ticket.areaName, ticket.lat, ticket.lng, ticket.openedAt, dispatches[ticket.id], 0, followerCount(ticket.id, follows), "auto"));
+  const fromTickets = tickets.map((ticket) => ({
+    ...base(ticket.id, ticket.areaName, ticket.lat, ticket.lng, ticket.openedAt, dispatches[ticket.id], 0, followerCount(ticket.id, follows), "auto"),
+    areaId: ticket.areaId,
+    ...(ticket.restoredAt ? { closedAt: ticket.restoredAt } : {}),
+  }));
 
   return [...fromTickets, ...fromReports];
 }
 
+/** Every incident a resident may follow: open citizen reports (masters only) and open node-detected outages. */
+export const publicIncidents = (reports: OutageReport[], tickets: AutoTicket[], dispatches: Record<string, Dispatch>, follows: Record<string, string[]>): PublicIncident[] =>
+  publicHistory(reports, tickets, dispatches, follows).filter((incident) => incident.closedAt === undefined);
+
 export const nearbyIncidents = (all: PublicIncident[], point: { lat: number; lng: number }) =>
-  all.filter((incident) => distanceKm(point, incident) <= NEARBY_KM).sort((a, b) => distanceKm(point, a) - distanceKm(point, b));
+  all.filter((incident) => !incident.home && distanceKm(point, incident) <= NEARBY_KM).sort((a, b) => distanceKm(point, a) - distanceKm(point, b));
 
 /** The home page only shows outages this close to the visitor. */
 export const FEED_RADIUS_KM = 10;
@@ -158,7 +187,7 @@ export function feedNear(
   dispatches: Record<string, Dispatch>,
   follows: Record<string, string[]>,
 ): FeedItem[] {
-  const live = publicIncidents(reports, tickets, dispatches, follows).map((incident) => ({
+  const live = publicIncidents(reports, tickets, dispatches, follows).filter((incident) => !incident.home).map((incident) => ({
     id: incident.id,
     place: incident.area,
     status: incident.status,
@@ -166,15 +195,7 @@ export function feedNear(
     lng: incident.lng,
     priority: (incident.source === "auto" ? "High" : "Medium") as Priority,
   }));
-  const seeded = seedIncidents.map((incident) => ({
-    id: incident.id,
-    place: incident.place,
-    status: seedStatus[incident.id] ?? "Under investigation",
-    lat: incident.lat,
-    lng: incident.lng,
-    priority: incident.priority,
-  }));
-  return [...live, ...seeded]
+  return live
     .map((item) => ({ id: item.id, place: item.place, status: item.status, priority: item.priority, km: distanceKm(point, item) }))
     .filter((item) => item.km <= FEED_RADIUS_KM)
     .sort((a, b) => a.km - b.km);

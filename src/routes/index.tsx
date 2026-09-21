@@ -17,7 +17,7 @@ export const Route = createFileRoute("/")({
       { title: "LesediLink — Keep Tshwane's lights connected" },
       { name: "description", content: "LesediLink connects residents, technicians, dispatchers and department managers on one real-time electricity outage platform." },
       { property: "og:title", content: "LesediLink — Keep Tshwane's lights connected" },
-      { property: "og:description", content: "Report outages in under two minutes, dispatch the nearest crew and track restoration live." },
+      { property: "og:description", content: "Report outages in a few taps, dispatch the nearest crew and track restoration live." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -27,7 +27,7 @@ export const Route = createFileRoute("/")({
 
 const steps = [
   { icon: LogIn, title: "1. Sign up or log in", text: "First time here? Create a free account with your cell number. Returning? Log in and you'll go straight to your dashboard.", points: ["Confirm your cell number with a 6-digit code", "Keep your password private", "Log out when you're done"] },
-  { icon: FilePenLine, title: "2. Report an outage", text: "Tell us what happened in under two minutes. The guided form asks only what the crew needs.", points: ["Confirm your address or pin the map", "Describe the fault and add a photo", "Save it offline if you have no signal"] },
+  { icon: FilePenLine, title: "2. Report an outage", text: "Tell us what happened in a few taps. Your name and cell number come from your account, so there is nothing to retype.", points: ["We find your location for you", "Pick what is wrong. Photos and notes are optional", "Save it offline if you have no signal"] },
   { icon: BellRing, title: "3. Track restoration", text: "Follow your report from received to restored, and get notified at every step.", points: ["Live status timeline", "Estimated restoration time", "Outage & billing alerts"] },
   { icon: ShieldCheck, title: "4. Stay safe", text: "While you wait, keep yourself and your household safe around electrical faults.", points: ["Stay away from fallen lines", "Switch off appliances at the wall", "Emergency line 080 111 1556"] },
 ] as const;

@@ -44,18 +44,22 @@ export function createStore<T>(key: string, initial: T) {
     };
   };
 
+  function set(next: T) {
+    load();
+    value = next;
+    try {
+      localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      /* quota or blocked: keep in memory only */
+    }
+    emit();
+  }
+
   return {
     get,
-    set(next: T) {
-      load();
-      value = next;
-      try {
-        localStorage.setItem(key, JSON.stringify(next));
-      } catch {
-        /* quota or blocked: keep in memory only */
-      }
-      emit();
-    },
+    set,
+    /** Back to the starting value, in this tab and (through the storage event) in every other tab. */
+    reset: () => set(initial),
     use: () => useSyncExternalStore(subscribe, get, () => initial),
   };
 }

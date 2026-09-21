@@ -1,27 +1,41 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Activity, Bell, LogOut } from "lucide-react";
+import { Activity, LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { type Priority } from "@/components/lesedi/data";
+import { Toaster } from "@/components/ui/sonner";
+import { type MockUser, type Priority } from "@/components/lesedi/data";
 import { currentUser, signOut } from "@/lib/auth";
 import { CountUp } from "@/components/lesedi/motion";
 import { Logo } from "@/components/lesedi/logo";
+import { NotificationBell } from "@/components/lesedi/notification-bell";
+import { statusStore, useNodeEngine } from "@/lib/nodes";
+import { useClock, usePresenceHeartbeat } from "@/lib/presence";
 
 export function DashboardShell({ user, role, home, children }: { user: string; role: string; home: string; children: ReactNode }) {
   const navigate = useNavigate();
-  const [noticeOpen, setNoticeOpen] = useState(false);
+  const [session, setSession] = useState<MockUser | null>(null);
   const [allowed, setAllowed] = useState(false);
+  const status = statusStore.use();
+  const now = useClock(2000);
   const initials = user.split(" ").map((part) => part[0]).join("");
 
   // Only the logged-in user's own dashboard may render; anyone else is sent to login or to their own dashboard.
   useEffect(() => {
-    const session = currentUser();
-    if (!session) navigate({ to: "/login", replace: true });
-    else if (session.to !== home) navigate({ to: session.to, replace: true });
-    else setAllowed(true);
+    const current = currentUser();
+    if (!current) navigate({ to: "/login", replace: true });
+    else if (current.to !== home) navigate({ to: current.to, replace: true });
+    else {
+      setSession(current);
+      setAllowed(true);
+    }
   }, [home, navigate]);
+
+  // Every dashboard keeps the simulation alive and announces that it is online. Only one open tab runs the sensors.
+  useNodeEngine(allowed);
+  usePresenceHeartbeat(allowed ? session : null);
+  const live = status.at > 0 && now - status.at < 8000;
 
   function logout() {
     signOut();
@@ -43,10 +57,8 @@ export function DashboardShell({ user, role, home, children }: { user: string; r
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1 sm:gap-3">
-            <div className="hidden items-center gap-2 rounded-full bg-success-soft px-3 py-1.5 text-xs font-bold text-success md:flex"><span className="size-2 rounded-full bg-success" />All systems live</div>
-            <Button variant="ghost" size="icon" className="relative min-h-11 min-w-11" aria-label="Open notifications" onClick={() => setNoticeOpen(!noticeOpen)}>
-              <Bell /><span className="absolute right-2 top-2 size-2 rounded-full bg-destructive" />
-            </Button>
+            <div role="status" className={`hidden items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold md:flex ${live ? "bg-success-soft text-success" : "bg-warning-soft text-foreground"}`}><span className={`size-2 rounded-full ${live ? "bg-success" : "bg-warning"}`} />{live ? "All systems live" : "Connecting sensors…"}</div>
+            {session && <NotificationBell user={session} />}
             <div className="hidden items-center gap-2 border-l border-border pl-4 sm:flex">
               <div className="grid size-9 place-items-center rounded-full bg-secondary text-xs font-extrabold text-primary">{initials}</div>
               <div><p className="text-xs font-bold">{user}</p><p className="text-[11px] text-muted-foreground">{role}</p></div>
@@ -54,10 +66,10 @@ export function DashboardShell({ user, role, home, children }: { user: string; r
             <Button variant="outline" className="min-h-11" onClick={logout}><LogOut /> <span className="hidden sm:inline">Log out</span><span className="sr-only sm:hidden">Log out</span></Button>
           </div>
         </div>
-        {noticeOpen && <div className="absolute right-4 top-14 w-[min(360px,calc(100vw-2rem))] rounded-md border border-border bg-card p-4 shadow-xl"><p className="font-bold">3 new updates</p><p className="mt-2 text-sm text-muted-foreground">Critical outage #LL-4821 requires assignment.</p><Button className="mt-3 w-full" size="sm" onClick={() => setNoticeOpen(false)}>View updates</Button></div>}
       </header>
 
       <main id="workspace" className="page-enter mx-auto min-w-0 max-w-[1600px] p-4 sm:p-6 lg:p-8">{children}</main>
+      <Toaster position="top-center" offset={72} mobileOffset={72} />
     </div>
   );
 }

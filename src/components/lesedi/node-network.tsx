@@ -1,4 +1,4 @@
-import { CheckCircle2, Cross, PowerOff, Radio, RotateCcw, School, Store, Zap } from "lucide-react";
+import { CheckCircle2, CloudLightning, Cross, PowerOff, Radio, RotateCcw, School, Store, Trash2, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { MapMarker } from "@/components/lesedi/live-map";
@@ -7,7 +7,9 @@ import {
   areas, controlStore, cutPower, nodeDefs, restoreAllPower, restorePower, statusStore, ticketStore, toggleBrokenNode,
   type AutoTicket, type NodeState, type SiteType,
 } from "@/lib/nodes";
+import { useClock } from "@/lib/presence";
 import { ago } from "@/lib/reports";
+import { resetSimulation, stormScenario } from "@/lib/simulation";
 
 const siteIcon: Record<SiteType, typeof Cross> = { Clinic: Cross, School, "Spaza shop": Store };
 const stateStyle: Record<NodeState, string> = { online: "bg-success", late: "bg-warning", silent: "bg-destructive" };
@@ -31,6 +33,9 @@ export function NodeNetworkPanel() {
   const control = controlStore.use();
   const tickets = ticketStore.use();
   const restored = tickets.filter((ticket) => ticket.restoredAt).slice(0, 3);
+  const now = useClock(2000);
+  const seconds = status.at > 0 ? Math.max(0, Math.round((now - status.at) / 1000)) : undefined;
+  const running = seconds !== undefined && seconds < 8;
 
   return (
     <section className="rounded-md border border-border bg-card" aria-labelledby="nodes-title">
@@ -40,8 +45,16 @@ export function NodeNetworkPanel() {
           <p className="mt-1 text-xs text-muted-foreground">
             {nodeDefs.length} nodes at clinics, schools and spaza shops send a heartbeat every {HEARTBEAT_MS / 1000} s. A node with no power cannot speak, so missing heartbeats are the signal. An outage ticket opens when at least {SILENT_SHARE * 100}% of an area&apos;s nodes are silent, at least {ELSEWHERE_ONLINE_SHARE * 100}% of the other nodes are still online, and the check matches {STREAK_NEEDED} times in a row. Real devices belong to the pilot phase.
           </p>
+          <p role="status" className={`mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-bold ${running ? "bg-success-soft text-success" : "bg-warning-soft text-foreground"}`}>
+            <span className={`size-2 rounded-full ${running ? "bg-success" : "bg-warning"}`} />
+            {running ? `Sensors checked ${seconds} s ago · the simulation runs in whichever dashboard window is open` : "Sensor engine starting… keep at least one dashboard window open"}
+          </p>
         </div>
-        <Button variant="outline" size="sm" className="min-h-11" onClick={restoreAllPower}><RotateCcw /> Reset all nodes</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" className="min-h-11" onClick={stormScenario}><CloudLightning /> Storm: cut 3 areas</Button>
+          <Button variant="outline" size="sm" className="min-h-11" onClick={restoreAllPower}><RotateCcw /> Restore all power</Button>
+          <Button variant="destructive" size="sm" className="min-h-11" onClick={() => { if (window.confirm("Clear every report, job and outage in the simulation, in every open window?")) resetSimulation(); }}><Trash2 /> Reset simulation</Button>
+        </div>
       </div>
 
       <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">

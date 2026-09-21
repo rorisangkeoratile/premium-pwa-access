@@ -17,40 +17,41 @@ const stepFor = (stage: number) => (stage === -2 ? 0 : stage <= 0 ? 1 : stage ==
  * Everyone else — neighbours following the same outage — sees the area as a shaded circle, with no
  * address, no reporter and no photos. The crew's live position appears only while they are driving.
  */
-export function IncidentTracker({ incident, own = false, point, onUnfollow }: { incident: PublicIncident; own?: boolean; point?: { lat: number; lng: number } | undefined; onUnfollow?: () => void }) {
+export function IncidentTracker({ incident, own = false, point, onUnfollow, label }: { incident: PublicIncident; own?: boolean; point?: { lat: number; lng: number } | undefined; onUnfollow?: () => void; label?: string }) {
   const crews = crewStore.use();
   const destination = own && point ? point : { lat: incident.lat, lng: incident.lng };
   const crew = incident.techName ? (crews[incident.techName] ?? technicians.find((tech) => tech.name === incident.techName) ?? null) : null;
   const showCrew = incident.techVisible && crew !== null;
-  const route = useRoute(showCrew && crew ? { lat: crew.lat, lng: crew.lng } : null, showCrew ? destination : null);
+  const driving = showCrew && incident.techEnRoute;
+  const route = useRoute(driving && crew ? { lat: crew.lat, lng: crew.lng } : null, driving ? destination : null);
   const step = stepFor(incident.stage);
 
   const markers: MapMarker[] = [];
   if (own && point) markers.push({ id: "site", lat: point.lat, lng: point.lng, kind: "incident", label: "Your outage", detail: "Where your technician is heading" });
-  if (showCrew && crew) markers.push({ id: "crew", lat: crew.lat, lng: crew.lng, kind: "crew", label: incident.techFirst ?? "Technician", detail: route ? `About ${route.minutes} min away` : "On the way" });
+  if (showCrew && crew) markers.push({ id: "crew", lat: crew.lat, lng: crew.lng, kind: "crew", label: incident.techFirst ?? "Technician", detail: driving ? (route ? `About ${route.minutes} min away` : "On the way") : incident.stage >= 2 ? "On site now" : "Getting ready" });
 
-  const arrival = incident.stage >= 2 ? "On site" : showCrew ? (route ? `${route.minutes} min` : "…") : "To be confirmed";
+  const arrival = incident.stage >= 2 ? "On site" : driving ? (route ? `${route.minutes} min` : "…") : "To be confirmed";
 
   return (
     <section className="rounded-md border border-border bg-card" aria-labelledby={`track-${incident.id}`}>
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-4">
         <div className="min-w-0">
-          <p className="text-[10px] font-extrabold uppercase text-primary">{own ? "Your report" : incident.source === "auto" ? "Detected by our sensors" : "Outage you are following"}</p>
+          <p className="text-[10px] font-extrabold uppercase text-primary">{label ?? (own ? "Your report" : incident.source === "auto" ? "Detected by our sensors" : "Outage you are following")}</p>
           <h3 id={`track-${incident.id}`} className="mt-1 flex items-center gap-2 font-extrabold text-navy"><MapPin className="size-4 text-primary" /> {incident.area}</h3>
           <p className="text-xs text-muted-foreground">{incident.status} · reported {ago(incident.openedAt)} ago</p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1 rounded bg-secondary px-2 py-1 text-[11px] font-bold"><Users className="size-3.5" /> {incident.reports + incident.followers} affected</span>
+          <span className="flex items-center gap-1 rounded bg-secondary px-2 py-1 text-[11px] font-bold"><Users className="size-3.5" /> {incident.source === "auto" ? "Area-wide" : `${incident.reports + incident.followers} affected`}</span>
           {onUnfollow && <Button variant="outline" size="sm" className="min-h-11" onClick={onUnfollow}><BellOff /> Unfollow</Button>}
         </div>
       </div>
 
       <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,.8fr)]">
         <LiveMap
-          title={showCrew ? "TECHNICIAN ON THE WAY" : "AFFECTED AREA"}
-          subtitle={showCrew ? (route ? `${incident.techFirst} is about ${route.minutes} min away` : "Finding the route…") : own ? incident.status : "Approximate area · exact addresses are not shown"}
+          title={driving ? "TECHNICIAN ON THE WAY" : showCrew ? "TECHNICIAN LIVE" : "AFFECTED AREA"}
+          subtitle={driving ? (route ? `${incident.techFirst} is about ${route.minutes} min away` : "Finding the route…") : showCrew ? `${incident.techFirst}'s live position${incident.stage >= 2 ? " · on site now" : ""}` : own ? incident.status : "Approximate area · exact addresses are not shown"}
           markers={markers}
-          route={showCrew ? (route?.coords ?? null) : null}
+          route={driving ? (route?.coords ?? null) : null}
           area={own ? null : { lat: incident.lat, lng: incident.lng, radiusM: incident.radiusM }}
           heightClass="h-72"
         />

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import type { Incident, Priority } from "@/components/lesedi/data";
 import { createStore } from "@/lib/store";
+import { startTimer } from "@/lib/timer";
 import { ago } from "@/lib/reports";
 
 /**
@@ -9,8 +10,8 @@ import { ago } from "@/lib/reports";
  *
  * Every node sends a tiny "I'm alive" heartbeat every HEARTBEAT_MS. Nothing is ever reported *about* a
  * power cut: a node without power cannot speak, so the detector treats missing heartbeats as the signal.
- * In this prototype the "server" is a timer running in the dispatcher's browser tab; real devices and a
- * real backend belong to the pilot phase.
+ * In this prototype the "server" is a timer running in one open dashboard tab (see useNodeEngine); real
+ * devices and a real backend belong to the pilot phase.
  */
 
 export const HEARTBEAT_MS = 2000;
@@ -29,14 +30,15 @@ const RESTORED_BELOW = 0.25;
 
 export type SiteType = "Clinic" | "School" | "Spaza shop";
 export type NodeDef = { id: string; areaId: string; name: string; site: SiteType; lat: number; lng: number };
-export type AreaDef = { id: string; name: string; lat: number; lng: number };
+/** `people` is a rough estimate of how many residents lose power when the whole area goes dark. */
+export type AreaDef = { id: string; name: string; lat: number; lng: number; people: number };
 
 export const areas: AreaDef[] = [
-  { id: "soshanguve", name: "Soshanguve Block H", lat: -25.488, lng: 28.098 },
-  { id: "cbd", name: "Pretoria CBD", lat: -25.7461, lng: 28.1881 },
-  { id: "hatfield", name: "Hatfield", lat: -25.7487, lng: 28.238 },
-  { id: "mamelodi", name: "Mamelodi East", lat: -25.7, lng: 28.36 },
-  { id: "centurion", name: "Centurion", lat: -25.8603, lng: 28.1894 },
+  { id: "soshanguve", name: "Soshanguve Block H", lat: -25.488, lng: 28.098, people: 5240 },
+  { id: "cbd", name: "Pretoria CBD", lat: -25.7461, lng: 28.1881, people: 1860 },
+  { id: "hatfield", name: "Hatfield", lat: -25.7487, lng: 28.238, people: 920 },
+  { id: "mamelodi", name: "Mamelodi East", lat: -25.7, lng: 28.36, people: 3100 },
+  { id: "centurion", name: "Centurion", lat: -25.8603, lng: 28.1894, people: 680 },
 ];
 
 const offsets: [number, number][] = [[0.004, 0.002], [-0.003, 0.005], [0.001, -0.006], [-0.005, -0.002], [0.006, -0.004]];
@@ -63,7 +65,8 @@ export const nodeDefs: NodeDef[] = areas.flatMap((area) =>
 export type NodeState = "online" | "late" | "silent";
 export type AreaStatus = { total: number; online: number; late: number; silent: number; streak: number; elsewhereOnline: number };
 export type NetworkStatus = { at: number; nodes: Record<string, NodeState>; areas: Record<string, AreaStatus> };
-export type NodeControl = { lastSeen: Record<string, number>; broken: string[]; cut: string[] };
+/** What a person has switched off: whole areas without power, and single dead devices. The engine only reads this. */
+export type NodeControl = { broken: string[]; cut: string[] };
 
 export type AutoTicket = {
   id: string;
@@ -78,11 +81,16 @@ export type AutoTicket = {
   clinicAffected: boolean;
 };
 
-export const controlStore = createStore<NodeControl>("lesedilink.node-control", { lastSeen: {}, broken: [], cut: [] });
+export const controlStore = createStore<NodeControl>("lesedilink.node-control", { broken: [], cut: [] });
 export const statusStore = createStore<NetworkStatus>("lesedilink.node-status", { at: 0, nodes: {}, areas: {} });
 export const ticketStore = createStore<AutoTicket[]>("lesedilink.auto-tickets", []);
 
 const streaks: Record<string, number> = {};
+/**
+ * When each node last "spoke". Only the tab that runs the engine needs it, so it stays in memory instead of
+ * being written to the shared store every 2 s, where it used to overwrite a dispatcher's "Cut power" click.
+ */
+const lastSeen: Record<string, number> = {};
 
 /** One server cycle: receive heartbeats, then apply the detection rule to every area. */
 function tick() {
@@ -90,11 +98,9 @@ function tick() {
   const control = controlStore.get();
 
   // 1. Heartbeats: only nodes with power (and a working device) manage to send one.
-  const lastSeen = { ...control.lastSeen };
   for (const node of nodeDefs) {
     if (!control.cut.includes(node.areaId) && !control.broken.includes(node.id)) lastSeen[node.id] = now;
   }
-  controlStore.set({ ...control, lastSeen });
 
   // 2. Classify each node by how old its last heartbeat is.
   const nodes: Record<string, NodeState> = {};
@@ -147,14 +153,50 @@ function tick() {
   statusStore.set({ at: now, nodes, areas: areaStatus });
 }
 
-/** Runs the simulated node network + detector while the calling dashboard is mounted. */
-export function useNodeEngine() {
+const ENGINE_LOCK = "lesedilink-node-engine";
+
+function resetEngineMemory() {
+  for (const key of Object.keys(streaks)) delete streaks[key];
+  for (const key of Object.keys(lastSeen)) delete lastSeen[key];
+}
+
+/**
+ * Runs the simulated node network and detector. Every dashboard calls this, but the browser's Web Locks
+ * make sure only one open tab is the engine at a time. If that tab is closed, another tab takes over, so
+ * the simulation keeps going as long as any LesediLink tab is open.
+ */
+export function useNodeEngine(enabled = true) {
   useEffect(() => {
-    for (const key of Object.keys(streaks)) delete streaks[key];
-    tick();
-    const timer = setInterval(tick, HEARTBEAT_MS);
-    return () => clearInterval(timer);
-  }, []);
+    if (!enabled) return;
+    let cancelled = false;
+    let stopLeading: (() => void) | null = null;
+
+    const lead = () =>
+      new Promise<void>((resolve) => {
+        resetEngineMemory();
+        tick();
+        const stopTimer = startTimer(tick, HEARTBEAT_MS);
+        stopLeading = () => {
+          stopTimer();
+          resolve();
+        };
+      });
+
+    if (typeof navigator !== "undefined" && navigator.locks) {
+      void navigator.locks.request(ENGINE_LOCK, () => (cancelled ? undefined : lead())).catch(() => undefined);
+    } else {
+      void lead();
+    }
+    return () => {
+      cancelled = true;
+      stopLeading?.();
+    };
+  }, [enabled]);
+}
+
+/** Forget the sensors' short-term memory (used when the whole simulation is reset). */
+export function resetEngine() {
+  resetEngineMemory();
 }
 
 export function cutPower(areaId: string) {
