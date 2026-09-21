@@ -59,8 +59,8 @@ export function DashboardShell({ user, role, children }: { user: string; role: s
                   key={item.to}
                   to={item.to}
                   onClick={() => setMenuOpen(false)}
-                  className="grid min-h-14 w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-md px-3 text-left text-foreground transition-colors hover:bg-secondary"
-                  activeProps={{ className: "grid min-h-14 w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-md px-3 text-left bg-primary text-primary-foreground" }}
+                  className="grid min-h-14 w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-md px-3 text-left transition-colors hover:bg-secondary"
+                  activeProps={{ className: "bg-primary text-primary-foreground" }}
                 >
                   {({ isActive }) => (
                     <>
