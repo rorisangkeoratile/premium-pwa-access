@@ -7,8 +7,10 @@ export type Incident = {
   priority: Priority;
   people: string;
   age: string;
-  x: string;
-  y: string;
+  lat: number;
+  lng: number;
+  /** Set when the incident came from a citizen outage report. */
+  source?: "citizen" | "auto";
 };
 
 export const primaryIncident: Incident = {
@@ -18,21 +20,21 @@ export const primaryIncident: Incident = {
   priority: "Critical",
   people: "5,240",
   age: "8 min",
-  x: "27%",
-  y: "29%",
+  lat: -25.488,
+  lng: 28.098,
 };
 
 export const incidents: Incident[] = [
   primaryIncident,
-  { id: "#LL-4819", place: "Pretoria CBD", detail: "Substation trip · Church St", priority: "High", people: "1,860", age: "14 min", x: "51%", y: "55%" },
-  { id: "#LL-4814", place: "Hatfield", detail: "Partial supply interruption", priority: "Medium", people: "420", age: "23 min", x: "67%", y: "45%" },
-  { id: "#LL-4808", place: "Centurion", detail: "Residential feeder fault", priority: "Low", people: "68", age: "37 min", x: "57%", y: "78%" },
+  { id: "#LL-4819", place: "Pretoria CBD", detail: "Substation trip · Church St", priority: "High", people: "1,860", age: "14 min", lat: -25.7461, lng: 28.1881 },
+  { id: "#LL-4814", place: "Hatfield", detail: "Partial supply interruption", priority: "Medium", people: "420", age: "23 min", lat: -25.7487, lng: 28.238 },
+  { id: "#LL-4808", place: "Centurion", detail: "Residential feeder fault", priority: "Low", people: "68", age: "37 min", lat: -25.8603, lng: 28.1894 },
 ];
 
 export const technicians = [
-  { name: "Thabo Molefe", skill: "High voltage", distance: "2.4 km", status: "Available", initials: "TM" },
-  { name: "Maria Dlamini", skill: "Infrastructure", distance: "5.8 km", status: "Available", initials: "MD" },
-  { name: "James Nkosi", skill: "Electrical", distance: "8.1 km", status: "On job", initials: "JN" },
+  { name: "Thabo Molefe", skill: "High voltage", distance: "2.4 km", status: "Available", initials: "TM", lat: -25.505, lng: 28.109 },
+  { name: "Maria Dlamini", skill: "Infrastructure", distance: "5.8 km", status: "Available", initials: "MD", lat: -25.71, lng: 28.19 },
+  { name: "James Nkosi", skill: "Electrical", distance: "8.1 km", status: "On job", initials: "JN", lat: -25.746, lng: 28.236 },
 ];
 
 export const mockUsers = [

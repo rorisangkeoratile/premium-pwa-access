@@ -3,8 +3,15 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, Clock3, Gauge, Radio, Send, Siren, SlidersHorizontal, Users, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { CityMap, DashboardShell, PageHeading, PriorityBadge, Stat } from "@/components/lesedi/shell";
+import { DashboardShell, PageHeading, PriorityBadge, Stat } from "@/components/lesedi/shell";
+import { LiveMap, crewMarkers, incidentMarkers } from "@/components/lesedi/live-map";
+import { ReportEvidence } from "@/components/lesedi/report-evidence";
+import { AutoTicketDetail, NodeNetworkPanel, nodeMarkers } from "@/components/lesedi/node-network";
 import { incidents, primaryIncident, technicians } from "@/components/lesedi/data";
+import { distanceKm } from "@/lib/geo";
+import { JobFeed, LinkedReports } from "@/components/lesedi/job-progress";
+import { assignJob, crewStore, dispatchStore, reportStore, stageNames, toIncident } from "@/lib/reports";
+import { statusStore, ticketStore, ticketToIncident, useNodeEngine } from "@/lib/nodes";
 
 export const Route = createFileRoute("/dashboard/dispatcher")({
   head: () => ({
@@ -22,9 +29,41 @@ export const Route = createFileRoute("/dashboard/dispatcher")({
 
 function DispatcherDashboard() {
   const [filter, setFilter] = useState("All");
-  const [selected, setSelected] = useState(primaryIncident);
+  const [selectedId, setSelectedId] = useState(primaryIncident.id);
   const [assigned, setAssigned] = useState<string | null>(null);
-  const filtered = useMemo(() => filter === "All" ? incidents : incidents.filter((item) => item.priority === filter), [filter]);
+  const reports = reportStore.use();
+  const dispatches = dispatchStore.use();
+  const crewLocations = crewStore.use();
+  const tickets = ticketStore.use();
+  const nodeStatus = statusStore.use();
+  useNodeEngine();
+
+  // Auto-detected outages (from silent sensor nodes) and citizen reports (with their GPS pin and media) join the seeded incidents in one queue.
+  const openTickets = useMemo(() => tickets.filter((ticket) => !ticket.restoredAt), [tickets]);
+  // Duplicates are merged: only master reports enter the queue, with a count of the reports linked to them.
+  const openReports = useMemo(() => reports.filter((item) => !item.duplicateOf && dispatches[item.id]?.stage !== 4), [reports, dispatches]);
+  const allIncidents = useMemo(
+    () => [...openTickets.map(ticketToIncident), ...openReports.map((item) => toIncident(item, reports.filter((other) => other.duplicateOf === item.id).length)), ...incidents],
+    [openTickets, openReports, reports],
+  );
+  const filtered = useMemo(() => filter === "All" ? allIncidents : allIncidents.filter((item) => item.priority === filter), [filter, allIncidents]);
+  const selected = allIncidents.find((item) => item.id === selectedId) ?? primaryIncident;
+  const selectedReport = reports.find((item) => item.id === selected.id);
+  const selectedTicket = openTickets.find((item) => item.id === selected.id);
+  const linked = reports.filter((item) => item.duplicateOf === selected.id);
+  const dispatched = dispatches[selected.id];
+  const markers = useMemo(() => [...nodeMarkers(nodeStatus.nodes), ...incidentMarkers(allIncidents), ...crewMarkers(technicians, crewLocations)], [nodeStatus.nodes, allIncidents, crewLocations]);
+  const focus = useMemo(() => ({ lat: selected.lat, lng: selected.lng }), [selected.lat, selected.lng]);
+  const crewDistance = (tech: (typeof technicians)[number]) => {
+    const at = crewLocations[tech.name] ?? tech;
+    return `${distanceKm(at, selected).toFixed(1)} km`;
+  };
+
+  function dispatch() {
+    if (!assigned) return;
+    assignJob(selected.id, assigned);
+    setAssigned(null);
+  }
 
   return (
     <DashboardShell home="/dashboard/dispatcher" user="Naledi Mokoena" role="Senior dispatcher">
@@ -38,7 +77,7 @@ function DispatcherDashboard() {
       </section>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(350px,.75fr)]">
-        <CityMap />
+        <LiveMap markers={markers} focus={focus} onSelect={(id) => { if (allIncidents.some((item) => item.id === id)) setSelectedId(id); }} subtitle={`Tshwane metro · ${allIncidents.length} active incidents`} />
         <section className="rounded-md border border-border bg-card" aria-labelledby="queue-title">
           <div className="border-b border-border p-4">
             <div className="flex items-center justify-between">
@@ -49,16 +88,18 @@ function DispatcherDashboard() {
           </div>
           <div className="max-h-[310px] overflow-y-auto">
             {filtered.map((incident) => (
-              <button key={incident.id} onClick={() => setSelected(incident)} className={`w-full border-b border-border p-4 text-left transition-colors hover:bg-secondary ${selected.id === incident.id ? "bg-secondary" : "bg-card"}`}>
+              <button key={incident.id} onClick={() => setSelectedId(incident.id)} className={`w-full border-b border-border p-4 text-left transition-colors hover:bg-secondary ${selected.id === incident.id ? "bg-secondary" : "bg-card"}`}>
                 <div className="flex items-center justify-between gap-2"><PriorityBadge value={incident.priority} /><span className="text-[11px] font-bold text-muted-foreground">{incident.age}</span></div>
                 <p className="mt-2 font-extrabold text-navy">{incident.place}</p>
                 <p className="text-xs text-muted-foreground">{incident.detail}</p>
-                <div className="mt-2 flex items-center justify-between text-xs"><span><Users className="mr-1 inline size-3" />{incident.people} affected</span><span className="font-bold text-primary">{incident.id}</span></div>
+                <div className="mt-2 flex items-center justify-between text-xs"><span><Users className="mr-1 inline size-3" />{incident.people} affected</span><span className="font-bold text-primary">{dispatches[incident.id] ? `${dispatches[incident.id]?.tech.split(" ")[0]} · ${(dispatches[incident.id]?.stage ?? -1) < 0 ? "Assigned" : stageNames[dispatches[incident.id]?.stage ?? 0]} · ` : ""}{incident.id}{incident.source === "citizen" && " · Citizen report"}{incident.source === "auto" && " · Auto-detected"}</span></div>
               </button>
             ))}
           </div>
         </section>
       </div>
+
+      <div className="mt-5"><NodeNetworkPanel /></div>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,.7fr)]">
         <section className="rounded-md border border-border bg-card p-5">
@@ -70,16 +111,18 @@ function DispatcherDashboard() {
             </div>
             <PriorityBadge value={selected.priority} />
           </div>
-          <div className="mt-4 rounded-md bg-danger-soft p-3 text-sm"><AlertTriangle className="mr-2 inline size-4 text-destructive" /><strong>Possible duplicate:</strong> report #LL-4818 logged 420m away.</div>
+          {selectedReport ? <div className="mt-4"><ReportEvidence report={selectedReport} /></div> : selectedTicket ? <div className="mt-4"><AutoTicketDetail ticket={selectedTicket} /></div> : <div className="mt-4 rounded-md bg-danger-soft p-3 text-sm"><AlertTriangle className="mr-2 inline size-4 text-destructive" /><strong>Possible duplicate:</strong> report #LL-4818 logged 420m away.</div>}
+          {linked.length > 0 && <div className="mt-4"><LinkedReports reports={linked} /></div>}
+          {dispatched && <div className="mt-4"><JobFeed dispatch={dispatched} /></div>}
           <div className="mt-4 grid gap-2 sm:grid-cols-3">
             {technicians.map((tech) => (
               <button key={tech.name} disabled={tech.status !== "Available"} onClick={() => setAssigned(tech.name)} className={`rounded-md border p-3 text-left transition-colors disabled:opacity-50 ${assigned === tech.name ? "border-primary bg-secondary" : "border-border bg-card hover:border-primary"}`}>
                 <div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-full bg-secondary text-[10px] font-extrabold text-primary">{tech.initials}</span><span className="text-xs font-extrabold">{tech.name}</span></div>
-                <p className="mt-2 text-[11px] text-muted-foreground">{tech.skill} · {tech.distance}</p>
+                <p className="mt-2 text-[11px] text-muted-foreground">{tech.skill} · {crewDistance(tech)}</p>
               </button>
             ))}
           </div>
-          <Button className="mt-4 w-full" disabled={!assigned} onClick={() => setAssigned(null)}><Send />{assigned ? `Dispatch ${assigned}` : "Select an available technician"}</Button>
+          <Button className="mt-4 w-full" disabled={!assigned} onClick={dispatch}><Send />{assigned ? `Dispatch ${assigned}` : "Select an available technician"}</Button>
         </section>
 
         <div className="space-y-5">
@@ -97,7 +140,7 @@ function DispatcherDashboard() {
             <div className="mt-3 divide-y divide-border">
               {technicians.map((tech) => (
                 <div key={tech.name} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3">
-                  <div className="min-w-0"><p className="truncate text-sm font-bold">{tech.name}</p><p className="text-xs text-muted-foreground">{tech.skill} · {tech.distance}</p></div>
+                  <div className="min-w-0"><p className="truncate text-sm font-bold">{tech.name}</p><p className="text-xs text-muted-foreground">{tech.skill} · {crewDistance(tech)} from selected incident</p></div>
                   <span className={`rounded px-2 py-1 text-[10px] font-extrabold uppercase ${tech.status === "Available" ? "bg-success-soft text-success" : "bg-warning-soft text-foreground"}`}>{tech.status}</span>
                 </div>
               ))}

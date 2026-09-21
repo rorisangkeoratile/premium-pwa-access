@@ -1,11 +1,12 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
-import { ArrowLeft, Eye, EyeOff, LogIn, Zap } from "lucide-react";
+import { ArrowLeft, Building2, Eye, EyeOff, Headphones, Home, LogIn, Wrench, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/lesedi/shell";
-import { currentUser, signIn } from "@/lib/auth";
+import { mockUsers } from "@/components/lesedi/data";
+import { QUICK_LOGIN_ENABLED, currentUser, quickSignIn, signIn } from "@/lib/auth";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -16,6 +17,8 @@ export const Route = createFileRoute("/login")({
   }),
   component: LoginPage,
 });
+
+const roleIcons = { Customer: Home, Technician: Wrench, Dispatcher: Headphones, "Department manager": Building2 } as const;
 
 function LoginPage() {
   const navigate = useNavigate();
@@ -39,6 +42,11 @@ function LoginPage() {
     }
     setError("");
     navigate({ to: user.to, replace: true });
+  }
+
+  function quickLogin(role: (typeof mockUsers)[number]["role"]) {
+    const user = quickSignIn(role);
+    if (user) navigate({ to: user.to, replace: true });
   }
 
   return (
@@ -72,6 +80,23 @@ function LoginPage() {
           {error && <p role="alert" className="text-sm font-bold text-destructive">{error}</p>}
           <Button type="submit" size="lg" className="min-h-12 w-full"><LogIn /> Log in</Button>
         </form>
+
+        {QUICK_LOGIN_ENABLED && (
+          <section className="mt-6" aria-labelledby="quick-login-heading">
+            <h2 id="quick-login-heading" className="text-[11px] font-extrabold uppercase text-muted-foreground">Quick tap login</h2>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              {mockUsers.map((user) => {
+                const Icon = roleIcons[user.role];
+                return (
+                  <Button key={user.role} type="button" variant="outline" className="h-auto min-h-14 justify-start gap-3 px-3 py-2 text-left" onClick={() => quickLogin(user.role)}>
+                    <Icon className="size-5 shrink-0 text-primary" aria-hidden="true" />
+                    <span className="min-w-0"><span className="block text-sm font-bold">{user.role}</span><span className="block truncate text-[11px] font-normal text-muted-foreground">{user.name}</span></span>
+                  </Button>
+                );
+              })}
+            </div>
+          </section>
+        )}
       </main>
     </div>
   );

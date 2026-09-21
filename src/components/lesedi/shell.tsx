@@ -1,10 +1,10 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Activity, Bell, LocateFixed, LogOut, Zap } from "lucide-react";
+import { Activity, Bell, LogOut, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { incidents, type Priority } from "@/components/lesedi/data";
+import { type Priority } from "@/components/lesedi/data";
 import { currentUser, signOut } from "@/lib/auth";
 
 export function DashboardShell({ user, role, home, children }: { user: string; role: string; home: string; children: ReactNode }) {
@@ -77,17 +77,12 @@ export function Info({ label, value }: { label: string; value: string }) {
   return <div className="rounded-md bg-secondary p-3"><p className="text-[10px] font-extrabold uppercase text-muted-foreground">{label}</p><p className="mt-1 font-extrabold text-navy">{value}</p></div>;
 }
 
-export function Field({ id, label, children }: { id: string; label: string; children: ReactNode }) {
-  return <div className="space-y-2"><Label htmlFor={id}>{label}</Label>{children}</div>;
-}
-
-export function CityMap({ compact = false }: { compact?: boolean }) {
-  return <div className={`map-grid relative overflow-hidden rounded-md border border-border ${compact ? "min-h-64" : "min-h-[390px]"}`} aria-label="Map of active outages across Tshwane">
-    <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-card/90 p-3 backdrop-blur"><div><p className="text-xs font-extrabold text-navy">LIVE NETWORK MAP</p><p className="text-[11px] text-muted-foreground">Tshwane metro · 21 active incidents</p></div><Button variant="outline" size="icon" className="min-h-11 min-w-11" aria-label="Center map"><LocateFixed /></Button></div>
-    <div className="absolute left-[44%] top-[18%] h-[68%] w-[2px] rotate-[24deg] bg-card shadow-[0_0_0_5px_var(--color-card)]" />
-    <div className="absolute left-[12%] top-[54%] h-[2px] w-[75%] -rotate-[8deg] bg-card shadow-[0_0_0_5px_var(--color-card)]" />
-    <span className="absolute left-[44%] top-[42%] text-[11px] font-bold text-muted-foreground">PRETORIA</span><span className="absolute bottom-[14%] left-[51%] text-[11px] font-bold text-muted-foreground">CENTURION</span>
-    {incidents.map((incident) => <button key={incident.id} className="absolute grid size-9 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-4 border-card bg-destructive text-destructive-foreground shadow-lg transition-transform hover:scale-110 focus:scale-110" style={{ left: incident.x, top: incident.y }} aria-label={`${incident.priority} outage at ${incident.place}`}><Zap className="size-4" /></button>)}
-    <div className="absolute bottom-3 left-3 rounded-md border border-border bg-card/95 px-3 py-2 text-[10px] font-bold shadow"><span className="mr-3"><i className="mr-1 inline-block size-2 rounded-full bg-destructive" /> Outage</span><span><i className="mr-1 inline-block size-2 rounded-full bg-success" /> Crew</span></div>
-  </div>;
+export function Field({ id, label, hint, error, children }: { id: string; label: string; hint?: string; error?: string | undefined; children: ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      {children}
+      {error ? <p id={`${id}-error`} role="alert" className="text-xs font-bold text-destructive">{error}</p> : hint ? <p id={`${id}-hint`} className="text-xs text-muted-foreground">{hint}</p> : null}
+    </div>
+  );
 }

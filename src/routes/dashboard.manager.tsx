@@ -1,10 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Activity, Clock3, Download, ShieldCheck, Wallet, Wrench, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { CityMap, DashboardShell, PageHeading, Stat } from "@/components/lesedi/shell";
-import { technicians } from "@/components/lesedi/data";
+import { DashboardShell, PageHeading, Stat } from "@/components/lesedi/shell";
+import { LiveMap, crewMarkers, incidentMarkers } from "@/components/lesedi/live-map";
+import { incidents, technicians } from "@/components/lesedi/data";
+import { crewStore, reportStore, toIncident } from "@/lib/reports";
+import { ticketStore, ticketToIncident } from "@/lib/nodes";
 
 export const Route = createFileRoute("/dashboard/manager")({
   head: () => ({
@@ -22,6 +25,10 @@ export const Route = createFileRoute("/dashboard/manager")({
 
 function ManagerDashboard() {
   const [range, setRange] = useState("7 days");
+  const reports = reportStore.use();
+  const crewLocations = crewStore.use();
+  const tickets = ticketStore.use();
+  const markers = useMemo(() => [...incidentMarkers([...tickets.filter((ticket) => !ticket.restoredAt).map(ticketToIncident), ...reports.map(toIncident), ...incidents]), ...crewMarkers(technicians, crewLocations)], [reports, tickets, crewLocations]);
 
   return (
     <DashboardShell home="/dashboard/manager" user="Kagiso Phiri" role="Department manager · Energy & Electricity">
@@ -52,7 +59,7 @@ function ManagerDashboard() {
             ))}
           </div>
         </section>
-        <CityMap compact />
+        <LiveMap markers={markers} heightClass="h-64 xl:h-[280px]" subtitle="Incidents and crews across Tshwane" />
       </div>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-2">

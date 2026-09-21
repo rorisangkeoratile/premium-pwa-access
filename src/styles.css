@@ -176,3 +176,19 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
+
+/* Live map markers (Leaflet divIcons) */
+.ll-icon { background: none; border: 0; }
+.ll-pin { position: relative; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9999px; border: 3px solid var(--color-card); color: #fff; background: var(--color-destructive); box-shadow: 0 2px 8px rgb(0 0 0 / 0.35); }
+.ll-pin svg { width: 16px; height: 16px; }
+.ll-pin--high { background: var(--color-accent); color: var(--color-accent-foreground); }
+.ll-pin--medium { background: var(--color-warning); color: var(--color-foreground); }
+.ll-pin--low { background: var(--color-muted-foreground); }
+.ll-pin--crew { background: var(--color-success); }
+.ll-pin--me { background: var(--color-primary); }
+.ll-route { stroke: var(--color-primary); }
+.ll-node { display: block; width: 16px; height: 16px; border-radius: 4px; border: 2px solid var(--color-card); background: var(--color-success); box-shadow: 0 1px 4px rgb(0 0 0 / 0.4); }
+.ll-node--late { background: var(--color-warning); }
+.ll-node--silent { background: var(--color-destructive); }
+.ll-pin--me::after { content: ""; position: absolute; inset: -3px; border-radius: 9999px; border: 2px solid var(--color-primary); animation: ll-pulse 1.8s ease-out infinite; }
+@keyframes ll-pulse { from { transform: scale(1); opacity: 0.9; } to { transform: scale(2.2); opacity: 0; } }

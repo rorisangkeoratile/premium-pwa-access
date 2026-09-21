@@ -2,6 +2,9 @@ import { mockUsers } from "@/components/lesedi/data";
 
 const KEY = "lesedilink.session";
 
+/** Set to false to hide (and disable) the one-tap role logins on the login page. */
+export const QUICK_LOGIN_ENABLED = true;
+
 export type MockUser = (typeof mockUsers)[number];
 
 export function signIn(email: string, password: string): MockUser | null {
@@ -9,6 +12,13 @@ export function signIn(email: string, password: string): MockUser | null {
   if (!user) return null;
   try { sessionStorage.setItem(KEY, user.email); } catch { /* storage unavailable */ }
   return user;
+}
+
+export function quickSignIn(role: MockUser["role"]): MockUser | null {
+  if (!QUICK_LOGIN_ENABLED) return null;
+  const user = mockUsers.find((item) => item.role === role);
+  if (!user) return null;
+  return signIn(user.email, user.password);
 }
 
 export function currentUser(): MockUser | null {
