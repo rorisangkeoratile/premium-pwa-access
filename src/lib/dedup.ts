@@ -1,6 +1,6 @@
 import { distanceKm } from "@/lib/geo";
 import type { AutoTicket } from "@/lib/nodes";
-import { isHomeOutage, type Dispatch, type OutageReport, type OutageType } from "@/lib/reports";
+import { isHomeOutage, isResolved, type Dispatch, type OutageReport, type OutageType } from "@/lib/reports";
 
 /**
  * A new report this close to an open citizen report is treated as the same fault.
@@ -39,7 +39,7 @@ export function findDuplicate(
   if (ticket) return { id: ticket.id, kind: "auto", label: `${ticket.areaName} outage detected by our sensors` };
 
   const report = reports
-    .filter((item) => !isHomeOutage(item) && !item.duplicateOf && dispatches[item.id]?.stage !== 4 && distanceKm(point, item) <= REPORT_RADIUS_KM)
+    .filter((item) => !isHomeOutage(item) && !item.duplicateOf && !isResolved(dispatches[item.id]?.stage) && distanceKm(point, item) <= REPORT_RADIUS_KM)
     .sort((a, b) => distanceKm(point, a) - distanceKm(point, b))[0];
   if (report) return { id: report.id, kind: "report", label: `Report ${report.id} nearby` };
 

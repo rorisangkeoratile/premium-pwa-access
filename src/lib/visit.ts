@@ -1,5 +1,6 @@
 import { distanceKm, type GeoFix } from "@/lib/geo";
-import { dispatchStore, patchDispatch, updateJob, type Dispatch, type VisitPin } from "@/lib/reports";
+import { DEFAULT_REPAIR_ERT } from "@/lib/ert";
+import { STAGE, dispatchStore, patchDispatch, updateJob, type Dispatch, type VisitPin } from "@/lib/reports";
 
 /*
  * Arrival and the Visit PIN.
@@ -154,19 +155,19 @@ export function requestCompletion(id: string) {
   patchDispatch(id, { completion: { requestedAt: Date.now() } });
 }
 
-/** The resident's answer. "Yes" completes the job; "No" leaves it in progress and flags it. */
+/** The resident's answer. "Yes" resolves the job; "No" sends it back to repairs, flagged, with a fresh repair ERT. */
 export function answerCompletion(id: string, answer: "yes" | "no") {
   const job = dispatchStore.get()[id];
   const completion = job?.completion;
-  if (!job || !completion || completion.answer || (job.stage ?? -1) !== 3) return;
+  if (!job || !completion || completion.answer || (job.stage ?? -1) !== STAGE.testing) return;
   patchDispatch(id, { completion: { ...completion, answer, answeredAt: Date.now() } });
-  if (answer === "yes") updateJob(id, 4, "The resident confirmed the power is back on.", undefined, "resident");
-  else updateJob(id, 3, "The resident says the power is still off.", "Resident says the power is still off", "resident");
+  if (answer === "yes") updateJob(id, STAGE.resolved, "The resident confirmed the power is back on.", undefined, "resident");
+  else updateJob(id, STAGE.repairing, "The resident says the power is still off.", "Resident says the power is still off", "resident", Date.now() + DEFAULT_REPAIR_ERT);
 }
 
-/** The resident cannot confirm. The job is closed with a reason, flagged for the control centre to follow up. */
+/** The resident cannot confirm. The job is resolved with a reason, flagged for the control centre to follow up. */
 export function completeWithoutConfirmation(id: string, reason: string, note?: string) {
-  updateJob(id, 4, joinNotes(`Closed without the resident's confirmation: ${reason}.`, note), "Closed without the resident's confirmation");
+  updateJob(id, STAGE.resolved, joinNotes(`Resolved without the resident's confirmation: ${reason}.`, note), "Resolved without the resident's confirmation");
 }
 
 /** One line on where the resident handshake stands, for the control centre. Null when there is nothing waiting. */
@@ -177,7 +178,7 @@ export function visitStatus(dispatch: Dispatch): string | null {
     if (state === "active") return "At the property · waiting for the resident's Visit PIN";
     if (state === "locked" || state === "expired") return `Visit PIN ${state} · the technician can send a new one`;
   }
-  if (stage === 3 && dispatch.completion) {
+  if (stage === STAGE.testing && dispatch.completion) {
     if (!dispatch.completion.answer) return "Repair finished · waiting for the resident to confirm the power is back";
     if (dispatch.completion.answer === "no") return "The resident says the power is still off";
   }

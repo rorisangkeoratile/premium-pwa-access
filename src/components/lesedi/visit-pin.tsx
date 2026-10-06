@@ -4,7 +4,7 @@ import { CircleCheck, CircleX, KeyRound, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { GeoFix } from "@/lib/geo";
-import type { CompletionCheck, Dispatch, OutageReport, VisitPin } from "@/lib/reports";
+import { STAGE, type CompletionCheck, type Dispatch, type OutageReport, type VisitPin } from "@/lib/reports";
 import {
   ARRIVAL_OVERRIDE_REASONS,
   OVERRIDE_REASONS,
@@ -44,7 +44,7 @@ export function ResidentVisitCards({ report, dispatch }: { report: OutageReport;
   const first = dispatch.tech.split(" ")[0] ?? "Your technician";
   const state = pinState(dispatch.pin, now);
   const showPin = stage <= 1 && Boolean(dispatch.arrival) && dispatch.pin !== undefined && state !== "used" && state !== "none";
-  const asking = stage === 3 && dispatch.completion !== undefined && !dispatch.completion.answer;
+  const asking = stage === STAGE.testing && dispatch.completion !== undefined && !dispatch.completion.answer;
   if (!showPin && !asking) return null;
 
   return (
@@ -54,7 +54,7 @@ export function ResidentVisitCards({ report, dispatch }: { report: OutageReport;
         <section className="rounded-md border-2 border-accent bg-card p-5" aria-labelledby={`confirm-${report.id}`} aria-live="polite">
           <p className="flex items-center gap-2 text-[10px] font-extrabold uppercase text-primary"><CircleCheck className="size-4" /> Please confirm · {report.id}</p>
           <h2 id={`confirm-${report.id}`} className="mt-2 text-lg font-extrabold text-navy">Is your power back on?</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{first} says the repair at your property is finished. Please check, then tell us. If it is still off, the job stays open.</p>
+          <p className="mt-1 text-sm text-muted-foreground">{first} has finished the repair and is testing the supply at your property. Please check, then tell us. If it is still off, the repair carries on.</p>
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
             <Button size="lg" className="min-h-12" onClick={() => answerCompletion(report.id, "yes")}><CircleCheck /> Yes, my power is back</Button>
             <Button size="lg" variant="outline" className="min-h-12" onClick={() => answerCompletion(report.id, "no")}><CircleX /> No, it is still off</Button>
@@ -106,7 +106,7 @@ type PanelProps = {
 export function TechnicianVisitPanel(props: PanelProps) {
   const stage = props.dispatch.stage ?? -1;
   if (stage === 1) return <ArrivalStep {...props} />;
-  if (stage === 3 && props.household && props.dispatch.completion) return <CompletionWait {...props} completion={props.dispatch.completion} />;
+  if (stage === STAGE.testing && props.household && props.dispatch.completion) return <CompletionWait {...props} completion={props.dispatch.completion} />;
   return null;
 }
 
@@ -222,9 +222,9 @@ function CompletionWait({ jobId, completion, residentFirst, notes, onNotesUsed }
       {completion.answer === "no" ? (
         <p role="status" className="mt-1 text-sm font-bold text-destructive">{who} says the power is still off. Check the fault again, then ask them to confirm once it is fixed.</p>
       ) : (
-        <p role="status" className="mt-1 text-xs text-muted-foreground">Waiting for {who} to confirm the power is back on. They have been asked in their app, and the job closes when they say yes.</p>
+        <p role="status" className="mt-1 text-xs text-muted-foreground">Waiting for {who} to confirm the power is back on. They have been asked in their app, and the job is resolved when they say yes.</p>
       )}
-      <OverrideForm summary={`${who} can't confirm?`} action="Close without confirmation" onConfirm={(reason) => { completeWithoutConfirmation(jobId, reason, notes.trim() || undefined); onNotesUsed(); }} />
+      <OverrideForm summary={`${who} can't confirm?`} action="Resolve without confirmation" onConfirm={(reason) => { completeWithoutConfirmation(jobId, reason, notes.trim() || undefined); onNotesUsed(); }} />
     </div>
   );
 }

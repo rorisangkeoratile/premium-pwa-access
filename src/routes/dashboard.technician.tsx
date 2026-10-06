@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Camera, Check, CheckCircle2, ClipboardList, Clock3, ExternalLink, HardHat, Hourglass, LocateFixed, Navigation, Play, Square, Zap } from "lucide-react";
+import { ArrowRight, Camera, Check, CheckCircle2, ClipboardList, Clock3, ExternalLink, HardHat, Hourglass, LocateFixed, MessageSquareText, Navigation, Package, Play, Square, TimerReset, Wrench, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -16,7 +16,10 @@ import { currentUser } from "@/lib/auth";
 import { detectPosition, useWatchPosition, type GeoFix } from "@/lib/geo";
 import { jobsFor, type Job } from "@/lib/metrics";
 import { useRoute } from "@/lib/routing";
-import { ago, crewStore, dispatchStore, isHomeOutage, reportStore, stageNames, toIncident, updateJob } from "@/lib/reports";
+import { STAGE, ago, crewStore, dispatchStore, isHomeOutage, isResolved, reportStore, stageNames, toIncident, updateJob } from "@/lib/reports";
+import { DEFAULT_PARTS_ERT, DEFAULT_REPAIR_ERT, PARTS_ERT_CHOICES, REPAIR_ERT_CHOICES, clockTime, currentErt, dueLabel, nextReportDue, type ErtChoice } from "@/lib/ert";
+import { resolvedAt } from "@/lib/incidents";
+import { useClock } from "@/lib/presence";
 import { restorePower, ticketStore, ticketToIncident } from "@/lib/nodes";
 import { AREA_ARRIVAL_RADIUS_M, ARRIVAL_RADIUS_M, requestCompletion } from "@/lib/visit";
 
@@ -35,6 +38,24 @@ export const Route = createFileRoute("/dashboard/technician")({
 });
 
 const safetyChecks = ["Isolation confirmed", "PPE worn", "Area barricaded", "Earth applied"];
+const EXTEND_CHOICES: ErtChoice[] = [
+  { label: "30 minutes", ms: 30 * 60 * 1000 },
+  { label: "1 hour", ms: 60 * 60 * 1000 },
+  { label: "2 hours", ms: 120 * 60 * 1000 },
+  { label: "4 hours", ms: 240 * 60 * 1000 },
+];
+
+/** A labelled drop-down of time choices, for an ERT. */
+function ErtSelect({ id, label, choices, value, onChange }: { id: string; label: string; choices: ErtChoice[]; value: number; onChange: (ms: number) => void }) {
+  return (
+    <div>
+      <label htmlFor={id} className="block text-xs font-bold text-muted-foreground">{label}</label>
+      <select id={id} value={value} onChange={(event) => onChange(Number(event.target.value))} className="mt-1 h-11 w-full rounded-md border border-input bg-card px-3 text-sm">
+        {choices.map((choice) => <option key={choice.ms} value={choice.ms}>{choice.label}</option>)}
+      </select>
+    </div>
+  );
+}
 const TSHWANE = { lat: -25.7479, lng: 28.2293 };
 
 function TechnicianDashboard() {
@@ -48,6 +69,11 @@ function TechnicianDashboard() {
   // Starts empty and resets for each new job: a safety check the technician did not actually tick is not a
   // safety check, and it must not carry over from the last job.
   const [checked, setChecked] = useState<string[]>([]);
+  const [partsErt, setPartsErt] = useState(DEFAULT_PARTS_ERT);
+  const [repairErt, setRepairErt] = useState(DEFAULT_REPAIR_ERT);
+  const [extendBy, setExtendBy] = useState(EXTEND_CHOICES[0]!.ms);
+  const [noteError, setNoteError] = useState("");
+  const now = useClock(15000);
   const [simulating, setSimulating] = useState(false);
   const simTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const simulatingRef = useRef(false);
@@ -86,6 +112,12 @@ function TechnicianDashboard() {
 
   // A fresh checklist for each job: ticks from the last job must never look like progress on this one.
   useEffect(() => setChecked([]), [active?.id]);
+  useEffect(() => setNoteError(""), [active?.id, stage]);
+  const openedAt = active ? (active.ticket?.openedAt ?? active.report?.createdAt ?? active.dispatch.at) : 0;
+  const ert = activeDispatch ? currentErt(openedAt, activeDispatch) : undefined;
+  const reportDue = nextReportDue(activeDispatch);
+  const reportLate = reportDue !== undefined && now > reportDue;
+  const neededParts = Boolean(activeDispatch?.updates?.some((update) => update.stage === STAGE.awaitingParts));
 
   const shared = crewLocations[ME];
   const position = shared ?? (fix ? { lat: fix.lat, lng: fix.lng } : base ? { lat: base.lat, lng: base.lng } : TSHWANE);
@@ -95,7 +127,7 @@ function TechnicianDashboard() {
   const cityIncidents = useMemo(
     () => [
       ...tickets.filter((ticket) => !ticket.restoredAt).map(ticketToIncident),
-      ...reports.filter((report) => !report.duplicateOf && !isHomeOutage(report) && dispatches[report.id]?.stage !== 4).map((report) => toIncident(report)),
+      ...reports.filter((report) => !report.duplicateOf && !isHomeOutage(report) && !isResolved(dispatches[report.id]?.stage)).map((report) => toIncident(report)),
     ],
     [tickets, reports, dispatches],
   );
@@ -109,18 +141,18 @@ function TechnicianDashboard() {
   const etaLabel = route ? `${route.minutes} min` : "…";
 
   const startOfDay = new Date().setHours(0, 0, 0, 0);
-  const closedAt = (job: Job) => job.dispatch.updates?.filter((update) => update.stage === 4).at(-1)?.at ?? job.dispatch.at;
+  const closedAt = (job: Job) => resolvedAt(job.dispatch) ?? job.dispatch.at;
   const doneToday = doneJobs.filter((job) => closedAt(job) >= startOfDay).sort((a, b) => closedAt(b) - closedAt(a));
 
   // A home outage is fixed at the resident's property, so the resident takes part at both ends of the visit.
   const household = Boolean(active?.report && isHomeOutage(active.report));
   const completion = activeDispatch?.completion;
-  const awaitingResident = household && stage === 3 && completion !== undefined && !completion.answer;
+  const awaitingResident = household && stage === STAGE.testing && completion !== undefined && !completion.answer;
   // At "En route" a job is moved on by the arrival check (and the resident's PIN), not by the plain continue button.
   const arrivalStep = Boolean(active) && stage === 1;
   const arrivalRadius = active?.ticket ? AREA_ARRIVAL_RADIUS_M : ARRIVAL_RADIUS_M;
   const residentFirst = active?.report?.reporter.split(" ")[0];
-  const primaryLabel = stage === 4 ? "Job complete" : stage === 3 ? (household ? (awaitingResident ? "Waiting for the resident…" : completion?.answer === "no" ? "Ask the resident to confirm again" : "Ask the resident to confirm") : "Mark job complete") : "Save and continue";
+  const testingLabel = household ? (awaitingResident ? "Waiting for the resident…" : completion?.answer === "no" ? "Ask the resident to confirm again" : "Ask the resident to confirm") : "Mark resolved · power restored";
 
   /**
    * Where the technician is right now, for the arrival check. The GPS watch above is already running and
@@ -174,18 +206,51 @@ function TechnicianDashboard() {
     if (active && stage < 1) updateJob(active.id, 1, "On the way");
   }
 
-  function advance() {
+  /** Moves the job to `next`, sending the work notes with it. `ertMs` sets a new ERT for the phase it starts. */
+  function moveTo(next: number, ertMs?: number, fallbackNote?: string) {
     if (!active) return;
-    // A home outage is closed by the resident's confirmation, so at the last step the technician asks for it.
-    if (stage === 3 && household) {
+    updateJob(active.id, next, notes.trim() || fallbackNote, undefined, "technician", ertMs ? Date.now() + ertMs : undefined);
+    setNotes("");
+    setNoteError("");
+    // In the simulation a resolved repair brings the power back, so the sensors see it return and close the outage.
+    if (next === STAGE.resolved && active.ticket) restorePower(active.ticket.areaId);
+  }
+
+  function awaitParts() {
+    if (!notes.trim()) {
+      setNoteError("Say which parts are needed in the work notes, so the control centre can help get them.");
+      return;
+    }
+    moveTo(STAGE.awaitingParts, partsErt);
+  }
+
+  /** At "Testing": a home outage is resolved by the resident's confirmation, so the technician asks for it. */
+  function finishTesting() {
+    if (!active) return;
+    if (household) {
       requestCompletion(active.id);
       return;
     }
-    const next = Math.min(4, stage + 1);
-    updateJob(active.id, next, notes.trim() || undefined);
+    moveTo(STAGE.resolved);
+  }
+
+  /** The 30-minute status report: same stage, with the technician's notes. */
+  function sendStatusReport() {
+    if (!active) return;
+    updateJob(active.id, stage, notes.trim() || "Work continuing as planned.");
     setNotes("");
-    // In the simulation a finished repair brings the power back, so the sensors see it return and close the outage.
-    if (next === 4 && active.ticket) restorePower(active.ticket.areaId);
+    setNoteError("");
+  }
+
+  function extendErt() {
+    if (!active || ert === undefined) return;
+    if (!notes.trim()) {
+      setNoteError("Give a reason for the extension in the work notes. The resident is told the new time.");
+      return;
+    }
+    updateJob(active.id, stage, notes.trim(), undefined, "technician", Math.max(Date.now(), ert) + extendBy);
+    setNotes("");
+    setNoteError("");
   }
 
   function toggle(item: string) {
@@ -205,7 +270,7 @@ function TechnicianDashboard() {
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Shift summary">
         <Stat label="Jobs today" value={`${openJobs.length} open`} note={`${doneToday.length} completed today`} icon={ClipboardList} />
         <Stat label="Current ETA" value={active ? etaLabel : "—"} note={active ? (route ? `${distanceLabel} by road${route.source === "estimate" ? " (estimate)" : ""}` : "Finding route…") : "No job assigned"} icon={Navigation} />
-        <Stat label="Time on job" value={activeDispatch ? ago(activeDispatch.at) : "—"} note={activeDispatch ? "Since assigned" : "Standing by"} icon={Clock3} />
+        <Stat label="Next status report" value={reportDue !== undefined ? clockTime(reportDue) : "—"} note={reportDue !== undefined ? `${dueLabel(reportDue, now)}${ert !== undefined ? ` · ERT ${clockTime(ert)}` : ""}` : activeDispatch ? "Job resolved" : "Standing by"} icon={Clock3} alert={reportLate} />
         <Stat label="Safety checks" value={active ? `${checked.length} / 4` : "—"} note={active ? "Complete before energising" : "No job assigned"} icon={HardHat} alert={Boolean(active) && checked.length < 4} />
       </section>
 
@@ -286,16 +351,26 @@ function TechnicianDashboard() {
         {active && activeDispatch ? (
           <section className="rounded-md border border-border bg-card p-5">
             <h2 className="font-extrabold text-navy">Update job progress</h2>
-            <p className="mt-1 text-xs text-muted-foreground">The customer and control centre see each update instantly. Arrival is checked against your phone's GPS.{active.ticket ? " Completing the job restores power in the simulation, and the sensors then confirm it." : ""}</p>
+            <p className="mt-1 text-xs text-muted-foreground">The customer and control centre see each update instantly. Arrival is checked against your phone's GPS.{active.ticket ? " Resolving the job restores power in the simulation, and the sensors then confirm it." : ""}</p>
+
+            {ert !== undefined && reportDue !== undefined && (
+              <div className={`mt-4 rounded-md border p-3 text-sm ${reportLate || now > ert ? "border-destructive bg-danger-soft" : "border-border bg-secondary"}`} role="status">
+                <p className="font-extrabold text-navy">ERT {clockTime(ert)} <span className="text-xs font-bold text-muted-foreground">· {dueLabel(ert, now)}</span></p>
+                <p className="mt-1 text-xs">{reportLate ? <strong className="text-destructive">Status report overdue ({dueLabel(reportDue, now)}). Send one now.</strong> : <>Next status report due {clockTime(reportDue)} ({dueLabel(reportDue, now)}).</>} {stage === STAGE.awaitingParts ? "While waiting for parts, report when they arrive or extend the ERT." : stage === STAGE.repairing ? "Report when the repair is done, or extend the ERT if it is complex." : "Report every 30 minutes until the job is resolved."}</p>
+              </div>
+            )}
+
             <div className="mt-5 space-y-2">
-              {stageNames.map((item, index) => {
-                const tone = index === stage ? "border-primary bg-secondary" : index < stage ? "border-success bg-success-soft" : "border-border";
+              {stageNames.slice(0, STAGE.closed).map((item, index) => {
+                const skipped = index === STAGE.awaitingParts && stage > index && !neededParts;
+                const tone = index === stage ? "border-primary bg-secondary" : skipped ? "border-dashed border-border" : index < stage ? "border-success bg-success-soft" : "border-border";
                 // A job only moves forward through its checks, so a stage cannot be tapped to skip them.
                 return (
                   <div key={item} className={`flex min-h-12 w-full items-center gap-3 rounded-md border px-3 text-left ${tone}`}>
-                    <span className={`grid size-7 place-items-center rounded-full text-xs font-bold ${index < stage ? "bg-success text-primary-foreground" : index === stage ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{index < stage ? <Check className="size-4" /> : index + 1}</span>
-                    <span className="text-sm font-bold">{item}</span>
+                    <span className={`grid size-7 place-items-center rounded-full text-xs font-bold ${skipped ? "bg-muted text-muted-foreground" : index < stage ? "bg-success text-primary-foreground" : index === stage ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{index < stage && !skipped ? <Check className="size-4" /> : index + 1}</span>
+                    <span className={`text-sm font-bold ${skipped ? "text-muted-foreground" : ""}`}>{item}{index === STAGE.awaitingParts && stage <= STAGE.onSite ? " (if needed)" : ""}</span>
                     {index === stage && <span className="ml-auto text-[10px] font-extrabold uppercase text-primary">Current</span>}
+                    {skipped && <span className="ml-auto text-[10px] font-extrabold uppercase text-muted-foreground">Not needed</span>}
                   </div>
                 );
               })}
@@ -320,9 +395,44 @@ function TechnicianDashboard() {
 
             <div className="mt-5 border-t border-border pt-5">
               <Label htmlFor="work-notes">Work notes <span className="font-normal text-muted-foreground">(sent with the next update)</span></Label>
-              <Textarea id="work-notes" className="mt-2 min-h-24" placeholder="e.g. Fault found on the pole-top fuse, replacing now" value={notes} onChange={(e) => setNotes(e.target.value)} />
+              <Textarea id="work-notes" className="mt-2 min-h-24" aria-invalid={Boolean(noteError)} placeholder="e.g. Fault found on the pole-top fuse, replacing now" value={notes} onChange={(e) => { setNotes(e.target.value); setNoteError(""); }} />
+              {noteError && <p role="alert" className="mt-2 text-xs font-bold text-destructive">{noteError}</p>}
               <Button variant="outline" className="mt-3 w-full" onClick={() => setPhoto(!photo)}><Camera />{photo ? "Photo attached" : "Add site photo"}</Button>
-              {!arrivalStep && <Button className="mt-3 w-full" disabled={stage === 4 || awaitingResident} onClick={advance}>{stage >= 3 ? <CheckCircle2 /> : <ArrowRight />}{primaryLabel}</Button>}
+
+              {stage === STAGE.assigned && <Button className="mt-3 w-full" onClick={() => moveTo(STAGE.accepted)}><ArrowRight /> Accept job</Button>}
+              {stage === STAGE.accepted && <Button className="mt-3 w-full" onClick={() => moveTo(STAGE.enRoute, undefined, "On the way")}><ArrowRight /> I'm on my way</Button>}
+              {stage === STAGE.onSite && (
+                <div className="mt-4 grid gap-3 rounded-md border border-border p-3">
+                  <p className="text-sm font-extrabold text-navy">Fault assessed. What next?</p>
+                  <ErtSelect id="repair-ert" label="Time needed for the repair" choices={REPAIR_ERT_CHOICES} value={repairErt} onChange={setRepairErt} />
+                  <Button className="w-full" onClick={() => moveTo(STAGE.repairing, repairErt)}><Wrench /> Start repairs</Button>
+                  <div className="border-t border-border pt-3">
+                    <ErtSelect id="parts-ert" label="No parts on hand? When will they arrive?" choices={PARTS_ERT_CHOICES} value={partsErt} onChange={setPartsErt} />
+                    <Button variant="outline" className="mt-2 w-full" onClick={awaitParts}><Package /> Awaiting parts</Button>
+                  </div>
+                </div>
+              )}
+              {stage === STAGE.awaitingParts && (
+                <div className="mt-4 grid gap-3 rounded-md border border-border p-3">
+                  <ErtSelect id="repair-ert" label="Parts are here. Time needed for the repair" choices={REPAIR_ERT_CHOICES} value={repairErt} onChange={setRepairErt} />
+                  <Button className="w-full" onClick={() => moveTo(STAGE.repairing, repairErt, "Parts arrived")}><Wrench /> Parts arrived · start repairs</Button>
+                </div>
+              )}
+              {stage === STAGE.repairing && <Button className="mt-3 w-full" onClick={() => moveTo(STAGE.testing, undefined, "Repair done, testing the supply")}><ArrowRight /> Repair done · start testing</Button>}
+              {stage === STAGE.testing && <Button className="mt-3 w-full" disabled={awaitingResident} onClick={finishTesting}><CheckCircle2 /> {testingLabel}</Button>}
+              {stage >= STAGE.resolved && <Button className="mt-3 w-full" disabled><CheckCircle2 /> Job resolved</Button>}
+
+              {stage < STAGE.resolved && !arrivalStep && (
+                <Button variant={reportLate ? "default" : "outline"} className="mt-3 w-full" onClick={sendStatusReport}><MessageSquareText /> Send status report</Button>
+              )}
+              {(stage === STAGE.awaitingParts || stage === STAGE.repairing) && (
+                <details className="mt-3 rounded-md border border-border p-3">
+                  <summary className="min-h-8 cursor-pointer text-sm font-bold">Need more time? Extend the ERT</summary>
+                  <div className="mt-3"><ErtSelect id="extend-ert" label="Extend by" choices={EXTEND_CHOICES} value={extendBy} onChange={setExtendBy} /></div>
+                  <Button variant="outline" className="mt-3 min-h-11 w-full" onClick={extendErt}><TimerReset /> Extend ERT</Button>
+                  <p className="mt-2 text-[11px] text-muted-foreground">The reason in your work notes goes to the control centre, and the resident is told the new time. Performance is still measured on the first ERT.</p>
+                </details>
+              )}
               <Button variant="ghost" className="mt-2 w-full"><Zap /> Request additional crew</Button>
             </div>
           </section>

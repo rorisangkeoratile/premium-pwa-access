@@ -1,7 +1,8 @@
 import type { Priority } from "@/components/lesedi/data";
 import { distanceKm } from "@/lib/geo";
 import type { AutoTicket } from "@/lib/nodes";
-import { isHomeOutage, stageNames, type Dispatch, type OutageReport } from "@/lib/reports";
+import { currentErt } from "@/lib/ert";
+import { STAGE, isHomeOutage, isResolved, stageNames, type Dispatch, type OutageReport } from "@/lib/reports";
 import { createStore } from "@/lib/store";
 
 /**
@@ -40,7 +41,8 @@ export function areaLabel(address: string): string {
   return areas[0] ?? parts.find((part) => !STREET.test(part)) ?? "Tshwane";
 }
 
-export type PublicUpdate = { stage: number; at: number };
+/** A new `ertDue` on an update with the same stage is an ERT that was extended. */
+export type PublicUpdate = { stage: number; at: number; ertDue?: number | undefined };
 
 export type PublicIncident = {
   id: string;
@@ -51,7 +53,7 @@ export type PublicIncident = {
   lng: number;
   radiusM: number;
   openedAt: number;
-  /** -2 no crew yet, -1 assigned, 0–4 the technician's stages. */
+  /** -2 no crew yet, -1 assigned, 0–7 the technician's stages (see `stageNames`). */
   stage: number;
   status: string;
   /** Full name, used only to look up the crew's position. */
@@ -62,6 +64,8 @@ export type PublicIncident = {
   techVisible: boolean;
   /** True only while they are driving, when a route and an ETA are worth drawing. */
   techEnRoute: boolean;
+  /** The expected response time the city is working to right now. Undefined once resolved. */
+  ertDue?: number | undefined;
   /** Stage changes only. The technician's free-text notes stay on the staff dashboards. */
   updates: PublicUpdate[];
   reports: number;
@@ -71,8 +75,10 @@ export type PublicIncident = {
   home: boolean;
   /** The sensor-network area, for outages the sensors detected. */
   areaId?: string | undefined;
-  /** When it was resolved: a repair finished (reports) or the sensors saw power return (sensor outages). */
+  /** When it was resolved: the repair was resolved (reports) or the sensors saw power return (sensor outages). */
   closedAt?: number | undefined;
+  /** The incident was formally closed, after the resident's feedback or by the control centre. */
+  closed: boolean;
 };
 
 function statusLine(stage: number, first: string | undefined): string {
@@ -81,8 +87,11 @@ function statusLine(stage: number, first: string | undefined): string {
   if (stage === 0) return `${first} accepted the job and is getting ready`;
   if (stage === 1) return `${first} is on the way`;
   if (stage === 2) return `${first} is on site`;
-  if (stage === 3) return `${first} is repairing the fault`;
-  return "Power restored";
+  if (stage === STAGE.awaitingParts) return `${first} found the fault and is waiting for parts`;
+  if (stage === STAGE.repairing) return `${first} is repairing the fault`;
+  if (stage === STAGE.testing) return `${first} is testing the repair`;
+  if (stage === STAGE.resolved) return "Power restored";
+  return "Power restored · closed";
 }
 
 function base(id: string, area: string, lat: number, lng: number, openedAt: number, dispatch: Dispatch | undefined, reports: number, followers: number, source: "citizen" | "auto", home = false): PublicIncident {
@@ -100,9 +109,11 @@ function base(id: string, area: string, lat: number, lng: number, openedAt: numb
     ...(dispatch ? { techName: dispatch.tech, techFirst: first } : {}),
     // Residents asked to see the crew all the way through, not just while driving. The position is the
     // crew's own device, which is theirs to share, and it stops the moment the job is closed.
-    techVisible: stage >= 0 && stage <= 3,
-    techEnRoute: stage === 1,
-    updates: (dispatch?.updates ?? []).map((update) => ({ stage: update.stage, at: update.at })),
+    techVisible: stage >= STAGE.accepted && stage <= STAGE.testing,
+    techEnRoute: stage === STAGE.enRoute,
+    ...(isResolved(stage) ? {} : { ertDue: currentErt(openedAt, dispatch) }),
+    updates: (dispatch?.updates ?? []).map((update) => ({ stage: update.stage, at: update.at, ...(update.ertDue ? { ertDue: update.ertDue } : {}) })),
+    closed: stage === STAGE.closed,
     reports,
     followers,
     source,
@@ -138,7 +149,7 @@ export function publicHistory(
     .filter((report) => !report.duplicateOf)
     .map((report) => {
       const dispatch = dispatches[report.id];
-      const closedAt = dispatch?.stage === 4 ? ((dispatch.updates ?? []).filter((update) => update.stage === 4).at(-1)?.at ?? dispatch.at) : undefined;
+      const closedAt = isResolved(dispatch?.stage) ? resolvedAt(dispatch) : undefined;
       return {
         ...base(
           report.id,
@@ -203,3 +214,17 @@ export function feedNear(
 }
 
 export const stageLabel = (stage: number) => (stage < 0 ? "Technician assigned" : (stageNames[stage] ?? "Update"));
+
+/** When the repair was resolved: the latest time the job reached "Resolved". */
+export const resolvedAt = (dispatch: Dispatch | undefined) => (dispatch?.updates ?? []).filter((update) => update.stage === STAGE.resolved).at(-1)?.at ?? dispatch?.at;
+
+/**
+ * The steps a resident sees, and which one is current. "Awaiting parts" is only shown when the job needed parts.
+ * `stage` is -2 before a crew is assigned.
+ */
+export function progressSteps(stage: number, updates: { stage: number }[]): { steps: string[]; current: number } {
+  const parts = stage === STAGE.awaitingParts || updates.some((update) => update.stage === STAGE.awaitingParts);
+  const steps = ["Reported", "Technician assigned", "On the way", "On site", ...(parts ? ["Awaiting parts"] : []), "Repairs in progress", "Testing", "Resolved", "Closed"];
+  const byStage: Record<number, string> = { [-2]: "Reported", [-1]: "Technician assigned", 0: "Technician assigned", 1: "On the way", 2: "On site", 3: "Awaiting parts", 4: "Repairs in progress", 5: "Testing", 6: "Resolved", 7: "Closed" };
+  return { steps, current: Math.max(0, steps.indexOf(byStage[stage] ?? "Reported")) };
+}

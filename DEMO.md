@@ -30,12 +30,14 @@ Open four tabs: **Nomsa** (resident), **Naledi** (dispatcher), **Mpho** (technic
 2. **Naledi presses "Cut power" on Soshanguve Block H.** The sensors go quiet. After about ten seconds the system opens an outage on its own.
 3. **Nomsa gets an alert straight away**, although she is 35 km from home: a pop-up, an unread count on the bell, a device notification, and the Home card turns red with a live tracker.
 4. **A dispatcher assigns Mpho** (select the outage, pick Mpho, Dispatch). Mpho's dashboard receives the job instantly with an alert. Nomsa is told a technician was assigned.
-5. **Mpho works the job:** Save and continue (accepted), Save and continue (en route). Then arrival, which needs his position:
+5. **Mpho works the job:** Accept job, then I'm on my way. Then arrival, which needs his position:
    - **On a laptop, press "Simulate drive (demo)"** in the Directions bar. The marker drives along the real road route, the resident watches it move, and the position stays at the destination when it finishes, so "I've arrived" then passes.
    - **If arrival is still refused** (a laptop's location can be kilometres out), open **"GPS not working? Confirm arrival yourself"** under the button, pick a reason and confirm. The job carries on and the control centre sees it was not GPS-backed. Use this if anything stalls on the day.
-   - Then Save and continue (in progress) and **Mark job complete**.
+   - On site, he chooses **Start repairs** (30 minutes, or longer for a complex fault) or **Awaiting parts** (2 hours unless he picks longer; the work notes must say which parts). Each choice sets a new ERT that Nomsa sees on her tracker.
+   - From Awaiting parts: **Parts arrived · start repairs**. Then **Repair done · start testing**, then **Mark resolved · power restored**.
 6. **The repair restores power in the simulation.** The sensors see it return, the outage closes, and Nomsa gets "Power restored". Her bell tells the whole story.
-7. **Kagiso's numbers moved by themselves:** outages today, response time, resolution time, SLA compliance, hotspots and technician performance. "Export report" downloads a CSV.
+7. **The dispatcher closes it.** A sensor outage has no reporter to ask for feedback, so it waits under "Resolved · awaiting closure" until the dispatcher presses Close. For an outage a resident *reported*, a "How did we do?" card appears on their dashboard once it is resolved (stars, whether they were kept informed, and a comment), and their feedback closes the incident. Show this with a "Just my home" report.
+8. **Kagiso's numbers moved by themselves:** outages today, response time, resolution time, share within the 2-hour ERT, status reports on time, parts and repair deadlines met, customer satisfaction, residents' comments, hotspots and technician performance. "Export report" downloads a CSV.
 
 **The resident watches the technician the whole way.** From the moment the job is accepted until it is finished, the resident's tracker shows the technician's live position: a route and an ETA while driving, then "on site now" during the repair.
 
@@ -46,9 +48,17 @@ Other things worth showing:
 - **Storm scenario:** the "Storm" button cuts three areas at once, so the queue fills up and you can dispatch several crews.
 - **Who is online:** the dispatcher's header shows how many crews and dispatchers are online, and a technician whose window is closed shows as offline.
 
+## Expected response times and status reports
+
+- Every logged fault has an **ERT of 2 hours**: a crew should be on site by then.
+- From allocation until the job is resolved, the technician owes a **status report every 30 minutes** ("Send status report"). While awaiting parts or repairing, the report is due at that phase's ERT instead.
+- A technician can **extend the ERT** with a reason. The resident is told the new time, and performance is still measured on the first ERT.
+- Overdue reports and passed ERTs show in red on the dispatcher's queue, the job feed and the manager's dashboard.
+- The stages are: Accepted, En route, On site, Awaiting parts (only if needed), Repairs in progress, Testing, Resolved, Closed.
+
 ## If a technician cannot move a job forward
 
-"In progress" and "Complete" are not buttons in the stage list: that list is a status display. The job moves with the **big button at the bottom of the "Update job progress" panel**. At "En route" that button is replaced by the arrival step, so the job only moves once arrival is confirmed, by GPS or by hand with a reason.
+The stage list is a status display, not a set of buttons. The job moves with the **buttons at the bottom of the "Update job progress" panel**, which change with each stage. At "En route" that button is replaced by the arrival step, so the job only moves once arrival is confirmed, by GPS or by hand with a reason.
 
 ## If something looks like it is "not updating"
 

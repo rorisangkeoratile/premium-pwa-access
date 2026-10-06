@@ -8,15 +8,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { DashboardShell, Field, PageHeading, Stat } from "@/components/lesedi/shell";
 import { LiveMap } from "@/components/lesedi/live-map";
 import { IncidentTracker } from "@/components/lesedi/incident-tracker";
+import { FeedbackCard } from "@/components/lesedi/feedback-card";
+import { feedbackStore } from "@/lib/feedback";
 import { ResidentVisitCards } from "@/components/lesedi/visit-pin";
 import { currentUser, type MockUser } from "@/lib/auth";
 import { detectPosition, distanceKm, reverseGeocode } from "@/lib/geo";
 import { MAX_PHOTOS, MAX_VIDEO_MB, compressPhoto } from "@/lib/media";
 import { findDuplicate, type DuplicateMatch } from "@/lib/dedup";
 import { areas, ticketStore } from "@/lib/nodes";
-import { HOME_AREA_KM, NEARBY_KM, follow, followStore, isFollowing, nearbyIncidents, publicHistory, publicIncidents, unfollow } from "@/lib/incidents";
-import { nearestArea } from "@/lib/metrics";
-import { HOME_OUTAGE, addReport, ago, dispatchStore, isHomeOutage, nextReportId, profileStore, reportStore, setReportVideo, type OutageReport, type OutageType } from "@/lib/reports";
+import { HOME_AREA_KM, NEARBY_KM, follow, followStore, isFollowing, nearbyIncidents, progressSteps, publicHistory, publicIncidents, unfollow } from "@/lib/incidents";
+import { formatDuration, nearestArea } from "@/lib/metrics";
+import { HOME_OUTAGE, addReport, ago, dispatchStore, isHomeOutage, isResolved, nextReportId, profileStore, reportStore, setReportVideo, type OutageReport, type OutageType } from "@/lib/reports";
 
 export const Route = createFileRoute("/dashboard/customer")({
   head: () => ({
@@ -54,13 +56,14 @@ const typeChoices: { type: OutageType; title: string; text: string; icon: typeof
   { type: "Damaged equipment or hazard", title: "Sparks, fallen line or damage", text: "Damaged or dangerous equipment. Keep a safe distance.", icon: TriangleAlert },
 ];
 
-const customerSteps = ["Report received", "Technician assigned", "En route", "On site", "Repair in progress", "Restored"];
-
 function CustomerDashboard() {
   const reports = reportStore.use();
   const dispatches = dispatchStore.use();
   const tickets = ticketStore.use();
   const follows = followStore.use();
+  const feedback = feedbackStore.use();
+  /** Feedback requests the resident put off for now. They come back next visit. */
+  const [later, setLater] = useState<string[]>([]);
   const [submitted, setSubmitted] = useState<{ report: OutageReport; duplicate: DuplicateMatch | null } | null>(null);
 
   const [me, setMe] = useState<MockUser | null>(null);
@@ -225,12 +228,16 @@ function CustomerDashboard() {
 
   const mine = me ? reports.filter((report) => report.reporter === me.name) : [];
   const latest = mine[0];
-  const openMine = mine.filter((report) => dispatches[report.duplicateOf ?? report.id]?.stage !== 4);
+  const openMine = mine.filter((report) => !isResolved(dispatches[report.duplicateOf ?? report.id]?.stage));
   const masterId = latest ? (latest.duplicateOf ?? latest.id) : undefined;
   const myIncident = publicList.find((incident) => incident.id === masterId);
   // The timeline keeps showing a finished outage as "Restored"; the live tracker above is for open ones only.
   const myHistory = useMemo(() => publicHistory(reports, tickets, dispatches, follows), [reports, tickets, dispatches, follows]);
   const myLatestIncident = myHistory.find((incident) => incident.id === masterId);
+  // Every one of the resident's reports whose outage is resolved and that they have not rated yet.
+  const toRate = mine
+    .map((report) => ({ report, incident: myHistory.find((incident) => incident.id === (report.duplicateOf ?? report.id)) }))
+    .filter(({ report, incident }) => incident?.closedAt !== undefined && !feedback[report.id] && !later.includes(report.id));
   // The exact location is shown only to the person who filed that report; a merged report follows
   // someone else's incident, so it gets the same area-level view as any other follower.
   const ownPoint = latest && !latest.duplicateOf ? { lat: latest.lat, lng: latest.lng } : undefined;
@@ -267,7 +274,7 @@ function CustomerDashboard() {
 
   // Which step of the timeline is current, driven by the technician's updates.
   const myStage = myLatestIncident ? myLatestIncident.stage : -2;
-  const currentStep = !latest ? 2 : myStage === -2 ? 1 : myStage <= 1 ? 2 : myStage === 2 ? 3 : myStage === 3 ? 4 : 6;
+  const { steps: customerSteps, current: currentStep } = progressSteps(myStage, myLatestIncident?.updates ?? []);
   const stepNote = myLatestIncident?.status ?? "Waiting for a crew to be assigned";
 
   return (
@@ -279,6 +286,10 @@ function CustomerDashboard() {
         const dispatch = isHomeOutage(report) ? dispatches[report.id] : undefined;
         return dispatch ? <ResidentVisitCards key={report.id} report={report} dispatch={dispatch} /> : null;
       })}
+
+      {toRate.map(({ report, incident }) => (
+        <FeedbackCard key={report.id} report={report} area={incident?.area ?? "your area"} resolvedIn={incident?.closedAt !== undefined ? incident.closedAt - report.createdAt : undefined} onLater={() => setLater((current) => [...current, report.id])} />
+      ))}
 
       {home && (
         <section className={`mt-5 rounded-md border p-4 ${homeIncidents.length > 0 ? "border-destructive bg-danger-soft" : "border-border bg-card"}`} aria-labelledby="home-title">
@@ -501,7 +512,12 @@ function CustomerDashboard() {
         <section className="rounded-md border border-border bg-card p-5">
           <h2 className="font-extrabold text-navy">My report history</h2>
           <div className="mt-3 divide-y divide-border">
-            {[...mine.map((item) => [item.id, item.type, dispatches[item.duplicateOf ?? item.id]?.stage === 4 ? "Resolved" : item.duplicateOf ? "Merged · in progress" : "In progress"]), ...(me?.seedHistory ? [["#LL-4792", "Total blackout", "Resolved in 1h 05m"], ["#LL-4610", "Partial outage", "Resolved in 2h 10m"], ["#LL-4388", "Equipment damage", "Resolved in 5h 40m"]] : [])].map(([id, type, status]) => (
+            {[...mine.map((item) => {
+              const incident = myHistory.find((entry) => entry.id === (item.duplicateOf ?? item.id));
+              const rated = feedback[item.id];
+              const status = incident?.closedAt !== undefined ? `${incident.closed ? "Closed" : "Resolved"} in ${formatDuration(incident.closedAt - item.createdAt)}${rated ? ` · rated ${rated.rating}/5` : ""}` : item.duplicateOf ? "Merged · in progress" : "In progress";
+              return [item.id, item.type, status];
+            }), ...(me?.seedHistory ? [["#LL-4792", "Total blackout", "Resolved in 1h 05m"], ["#LL-4610", "Partial outage", "Resolved in 2h 10m"], ["#LL-4388", "Equipment damage", "Resolved in 5h 40m"]] : [])].map(([id, type, status]) => (
               <div key={id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3">
                 <div className="min-w-0"><p className="truncate text-sm font-bold">{type}</p><p className="text-xs text-muted-foreground">{id}</p></div>
                 <span className="text-xs font-bold text-primary">{status}</span>

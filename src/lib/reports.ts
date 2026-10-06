@@ -36,11 +36,21 @@ export type OutageReport = {
   duplicateOf?: string | undefined;
 };
 
-/** Technician progress stages, in order. A dispatch that has not been accepted yet has stage -1. */
-export const stageNames = ["Accepted", "En route", "On site", "In progress", "Complete"] as const;
+/**
+ * Technician progress stages, in order. A dispatch that has not been accepted yet has stage -1.
+ * "Awaiting parts" is optional: a job goes from "On site" either to it or straight to "Repairs in progress".
+ * A job is finished for the technician at "Resolved"; it is "Closed" once the resident has given feedback
+ * or the control centre closes it.
+ */
+export const stageNames = ["Accepted", "En route", "On site", "Awaiting parts", "Repairs in progress", "Testing", "Resolved", "Closed"] as const;
+export const STAGE = { assigned: -1, accepted: 0, enRoute: 1, onSite: 2, awaitingParts: 3, repairing: 4, testing: 5, resolved: 6, closed: 7 } as const;
+/** The fault is fixed: the power is back, whether or not the incident has been closed yet. */
+export const isResolved = (stage: number | undefined) => (stage ?? -1) >= STAGE.resolved;
 export type JobUpdate = {
   stage: number;
   at: number;
+  /** The expected response time (ERT) set with this update: when the current phase should be finished. See `ert.ts`. */
+  ertDue?: number | undefined;
   note?: string | undefined;
   /** A warning for the control centre, e.g. the job moved on without the resident's PIN or confirmation. */
   flag?: string | undefined;
@@ -61,7 +71,8 @@ export const reportStore = createStore<OutageReport[]>("lesedilink.reports", [])
 export type CustomerProfile = { phone: string; account: string };
 export const profileStore = createStore<Record<string, CustomerProfile>>("lesedilink.customer-profiles", {});
 
-export const dispatchStore = createStore<Record<string, Dispatch>>("lesedilink.dispatches", {});
+// v2: the stages were renumbered when "Awaiting parts", "Testing", "Resolved" and "Closed" were added.
+export const dispatchStore = createStore<Record<string, Dispatch>>("lesedilink.dispatches.v2", {});
 export const crewStore = createStore<Record<string, CrewLocation>>("lesedilink.crews", {});
 
 // Videos are too large for localStorage, so they live in memory for this browser session only.
@@ -79,11 +90,11 @@ export function assignJob(id: string, tech: string) {
 }
 
 /** A progress update. It is stored once and read by the customer, technician, dispatcher and manager dashboards. */
-export function updateJob(id: string, stage: number, note?: string, flag?: string, actor: NonNullable<JobUpdate["actor"]> = "technician") {
+export function updateJob(id: string, stage: number, note?: string, flag?: string, actor: NonNullable<JobUpdate["actor"]> = "technician", ertDue?: number) {
   const all = dispatchStore.get();
   const current = all[id];
   if (!current) return;
-  const update: JobUpdate = { stage, at: Date.now(), actor, ...(note ? { note } : {}), ...(flag ? { flag } : {}) };
+  const update: JobUpdate = { stage, at: Date.now(), actor, ...(note ? { note } : {}), ...(flag ? { flag } : {}), ...(ertDue ? { ertDue } : {}) };
   dispatchStore.set({ ...all, [id]: { ...current, stage, updates: [...(current.updates ?? []), update] } });
 }
 

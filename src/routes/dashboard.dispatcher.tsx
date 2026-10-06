@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Clock3, Gauge, Radio, Send, Siren, SlidersHorizontal, Users, Wrench } from "lucide-react";
+import { AlertTriangle, Archive, Clock3, Gauge, Radio, Send, Siren, SlidersHorizontal, Star, Users, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { DashboardShell, PageHeading, PriorityBadge, Stat } from "@/components/lesedi/shell";
@@ -11,7 +11,8 @@ import { mockUsers, technicians, type MockUser, type Priority } from "@/componen
 import { currentUser } from "@/lib/auth";
 import { distanceKm } from "@/lib/geo";
 import { JobFeed, LinkedReports } from "@/components/lesedi/job-progress";
-import { assignJob, crewStore, dispatchStore, reportStore, stageNames, toIncident } from "@/lib/reports";
+import { STAGE, assignJob, crewStore, dispatchStore, isResolved, reportStore, stageNames, toIncident } from "@/lib/reports";
+import { closeIncident, feedbackStore } from "@/lib/feedback";
 import { crewStatus, formatDuration, incidentRows, summarise } from "@/lib/metrics";
 import { statusStore, ticketStore, ticketToIncident } from "@/lib/nodes";
 import { followStore, followerCount } from "@/lib/incidents";
@@ -48,6 +49,7 @@ function DispatcherDashboard() {
   const tickets = ticketStore.use();
   const nodeStatus = statusStore.use();
   const follows = followStore.use();
+  const feedback = feedbackStore.use();
   const presence = usePresence();
   const now = useClock(3000);
   const online = useMemo(() => onlineEmails(presence, now), [presence, now]);
@@ -59,7 +61,7 @@ function DispatcherDashboard() {
       [
         ...tickets.filter((ticket) => !ticket.restoredAt).map((ticket) => ({ incident: ticketToIncident(ticket), openedAt: ticket.openedAt })),
         ...reports
-          .filter((item) => !item.duplicateOf && dispatches[item.id]?.stage !== 4)
+          .filter((item) => !item.duplicateOf && !isResolved(dispatches[item.id]?.stage))
           .map((item) => ({ incident: toIncident(item, reports.filter((other) => other.duplicateOf === item.id).length, followerCount(item.id, follows)), openedAt: item.createdAt })),
       ].sort((a, b) => priorityRank[a.incident.priority] - priorityRank[b.incident.priority] || b.openedAt - a.openedAt),
     [tickets, reports, dispatches, follows],
@@ -71,6 +73,7 @@ function DispatcherDashboard() {
   const selectedTicket = selected ? tickets.find((item) => item.id === selected.id && !item.restoredAt) : undefined;
   const linked = selected ? reports.filter((item) => item.duplicateOf === selected.id) : [];
   const dispatched = selected ? dispatches[selected.id] : undefined;
+  const selectedOpenedAt = entries.find((entry) => entry.incident.id === selected?.id)?.openedAt ?? Date.now();
 
   const crew = useMemo(
     () =>
@@ -79,7 +82,11 @@ function DispatcherDashboard() {
         .sort((a, b) => Number(b.online) - Number(a.online) || Number(a.status === "On job") - Number(b.status === "On job")),
     [reports, tickets, dispatches, online],
   );
-  const summary = useMemo(() => summarise(incidentRows(reports, tickets, dispatches, follows), now), [reports, tickets, dispatches, follows, now]);
+  const rows = useMemo(() => incidentRows(reports, tickets, dispatches, follows, feedback, now), [reports, tickets, dispatches, follows, feedback, now]);
+  const summary = useMemo(() => summarise(rows, now), [rows, now]);
+  const rowById = useMemo(() => new Map(rows.map((row) => [row.id, row])), [rows]);
+  // Resolved by the technician, but not closed yet: the control centre waits for the resident's feedback, or closes it.
+  const awaitingClosure = rows.filter((row) => row.stage === STAGE.resolved);
   const availableCount = crew.filter((item) => item.status === "Available").length;
   const crewOnline = crew.filter((item) => item.online).length;
   const dispatchersOnline = new Set([...online].map((email) => mockUsers.find((user) => user.email === email)).filter((user) => user?.role === "Dispatcher").map((user) => user!.name)).size;
@@ -110,7 +117,7 @@ function DispatcherDashboard() {
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Live response metrics">
         <Stat label="Active outages" value={String(summary.open)} note={`${summary.openedToday} opened today`} icon={Siren} alert={summary.open > 0} />
         <Stat label="People affected" value={summary.affected.toLocaleString("en-ZA")} note="Estimate, open outages" icon={Users} />
-        <Stat label="Avg. response" value={formatDuration(summary.avgResponseMs)} note={summary.responded > 0 ? `${summary.responded} crew arrival${summary.responded === 1 ? "" : "s"} so far` : "No crew on site yet"} icon={Clock3} />
+        <Stat label="Avg. response" value={formatDuration(summary.avgResponseMs)} note={summary.ertOverdue + summary.reportsOverdue > 0 ? `${summary.ertOverdue} past ERT · ${summary.reportsOverdue} status report${summary.reportsOverdue === 1 ? "" : "s"} overdue` : summary.responded > 0 ? `${summary.responded} crew arrival${summary.responded === 1 ? "" : "s"} · ERT 2 h` : "ERT 2 h · no crew on site yet"} icon={Clock3} alert={summary.ertOverdue + summary.reportsOverdue > 0} />
         <Stat label="Crews available" value={`${availableCount} / ${crew.length}`} note={`${crewOnline} online now`} icon={Wrench} />
       </section>
 
@@ -126,14 +133,26 @@ function DispatcherDashboard() {
           </div>
           <div className="max-h-[310px] overflow-y-auto">
             {filtered.length === 0 && <p className="p-4 text-sm text-muted-foreground">{allIncidents.length === 0 ? "All quiet. No open incidents. Cut power in an area below, or file a report as a resident, and it appears here instantly." : "No incidents at this priority."}</p>}
-            {filtered.map((incident) => (
+            {filtered.map((incident) => {
+              const row = rowById.get(incident.id);
+              const pastErt = row?.ertDue !== undefined && now > row.ertDue;
+              const reportLate = row?.reportDue !== undefined && now > row.reportDue;
+              return (
               <button key={incident.id} onClick={() => setSelectedId(incident.id)} className={`w-full border-b border-border p-4 text-left transition-colors hover:bg-secondary ${selected?.id === incident.id ? "bg-secondary" : "bg-card"}`}>
                 <div className="flex items-center justify-between gap-2"><PriorityBadge value={incident.priority} /><span className="text-[11px] font-bold text-muted-foreground">{incident.age}</span></div>
                 <p className="mt-2 font-extrabold text-navy">{incident.place}</p>
                 <p className="text-xs text-muted-foreground">{incident.detail}</p>
+                {(pastErt || reportLate || row?.stage === STAGE.awaitingParts) && (
+                  <div className="mt-2 flex flex-wrap gap-1 text-[10px] font-extrabold uppercase">
+                    {row?.stage === STAGE.awaitingParts && <span className="rounded bg-warning-soft px-1.5 py-0.5">Awaiting parts</span>}
+                    {pastErt && <span className="rounded bg-danger-soft px-1.5 py-0.5 text-destructive">ERT passed</span>}
+                    {reportLate && <span className="rounded bg-danger-soft px-1.5 py-0.5 text-destructive">Status report overdue</span>}
+                  </div>
+                )}
                 <div className="mt-2 flex items-center justify-between text-xs"><span><Users className="mr-1 inline size-3" />{incident.people}</span><span className="font-bold text-primary">{dispatches[incident.id] ? `${dispatches[incident.id]?.tech.split(" ")[0]} · ${(dispatches[incident.id]?.stage ?? -1) < 0 ? "Assigned" : stageNames[dispatches[incident.id]?.stage ?? 0]} · ` : ""}{incident.id}{incident.source === "citizen" && " · Citizen report"}{incident.source === "auto" && " · Auto-detected"}</span></div>
               </button>
-            ))}
+              );
+            })}
           </div>
         </section>
       </div>
@@ -154,7 +173,7 @@ function DispatcherDashboard() {
               </div>
               {selectedReport ? <div className="mt-4"><ReportEvidence report={selectedReport} /></div> : selectedTicket ? <div className="mt-4"><AutoTicketDetail ticket={selectedTicket} /></div> : null}
               {linked.length > 0 && <div className="mt-4"><LinkedReports reports={linked} /></div>}
-              {dispatched && <div className="mt-4"><JobFeed dispatch={dispatched} /></div>}
+              {dispatched && <div className="mt-4"><JobFeed dispatch={dispatched} openedAt={selectedOpenedAt} /></div>}
               <div className="mt-4 grid max-h-72 gap-2 overflow-y-auto sm:grid-cols-2 xl:grid-cols-3">
                 {crew.map(({ tech, status, job, online: isOnline }) => (
                   <button key={tech.name} disabled={status !== "Available"} onClick={() => setAssigned(tech.name)} className={`rounded-md border p-3 text-left transition-colors disabled:opacity-50 ${assigned === tech.name ? "border-primary bg-secondary" : "border-border bg-card hover:border-primary"}`}>
@@ -182,10 +201,27 @@ function DispatcherDashboard() {
               <div><p className="text-[10px] font-extrabold uppercase text-primary-foreground/60">Service target</p><h2 className="mt-1 text-lg font-extrabold">Restore power safely, faster</h2></div>
               <Gauge className="size-7 text-accent" />
             </div>
-            <div className="mt-6 flex items-end gap-3"><span className="text-5xl font-extrabold">{summary.slaPct === undefined ? "—" : `${summary.slaPct}%`}</span><span className="pb-1 text-sm text-primary-foreground/70">SLA compliance</span></div>
+            <div className="mt-6 flex items-end gap-3"><span className="text-5xl font-extrabold">{summary.slaPct === undefined ? "—" : `${summary.slaPct}%`}</span><span className="pb-1 text-sm text-primary-foreground/70">within ERT</span></div>
             <div className="mt-4 h-2 overflow-hidden rounded-full bg-primary-foreground/15"><div className="h-full bg-accent transition-[width] duration-500" style={{ width: `${summary.slaPct ?? 0}%` }} /></div>
-            <p className="mt-4 text-xs text-primary-foreground/70">{summary.responded > 0 ? `Crews reached the site within 30 minutes in ${summary.slaPct}% of ${summary.responded} response${summary.responded === 1 ? "" : "s"}.` : "Fills in as crews reach the first outage."}</p>
+            <p className="mt-4 text-xs text-primary-foreground/70">{summary.slaPct !== undefined ? `Crews reached the site within the 2-hour ERT in ${summary.slaPct}% of outages. Status reports on time: ${summary.reportsPct === undefined ? "—" : `${summary.reportsPct}%`}.` : "Fills in as crews reach the first outage."}</p>
           </section>
+          {awaitingClosure.length > 0 && (
+            <section className="rounded-md border border-border bg-card p-5" aria-labelledby="closure-title">
+              <h2 id="closure-title" className="font-extrabold text-navy">Resolved · awaiting closure</h2>
+              <p className="text-xs text-muted-foreground">Closed automatically when the resident gives feedback. Close one yourself if they do not respond.</p>
+              <div className="mt-3 divide-y divide-border">
+                {awaitingClosure.map((row) => (
+                  <div key={row.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold">{row.place}</p>
+                      <p className="flex items-center gap-1 text-xs text-muted-foreground">{row.id} · {row.tech?.split(" ")[0]} · {row.ratings.length > 0 ? <><Star className="size-3 fill-accent text-accent" /> {row.ratings.join(", ")}/5</> : row.source === "auto" ? "Sensor outage" : "No feedback yet"}</p>
+                    </div>
+                    <Button size="sm" variant="outline" className="min-h-11" onClick={() => closeIncident(row.id)}><Archive /> Close</Button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
           <section className="rounded-md border border-border bg-card p-5">
             <h2 className="font-extrabold text-navy">Crew status board</h2>
             <div className="mt-3 max-h-80 divide-y divide-border overflow-y-auto">

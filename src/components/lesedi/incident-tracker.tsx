@@ -4,11 +4,10 @@ import { Button } from "@/components/ui/button";
 import { LiveMap, type MapMarker } from "@/components/lesedi/live-map";
 import { technicians } from "@/components/lesedi/data";
 import { useRoute } from "@/lib/routing";
-import { ago, crewStore } from "@/lib/reports";
-import { stageLabel, type PublicIncident } from "@/lib/incidents";
-
-const steps = ["Reported", "Technician assigned", "On the way", "On site", "Repair in progress", "Restored"];
-const stepFor = (stage: number) => (stage === -2 ? 0 : stage <= 0 ? 1 : stage === 1 ? 2 : stage === 2 ? 3 : stage === 3 ? 4 : 5);
+import { clockTime, dueLabel } from "@/lib/ert";
+import { useClock } from "@/lib/presence";
+import { STAGE, ago, crewStore } from "@/lib/reports";
+import { progressSteps, stageLabel, type PublicIncident } from "@/lib/incidents";
 
 /**
  * Live view of one incident.
@@ -24,7 +23,9 @@ export function IncidentTracker({ incident, own = false, point, onUnfollow, labe
   const showCrew = incident.techVisible && crew !== null;
   const driving = showCrew && incident.techEnRoute;
   const route = useRoute(driving && crew ? { lat: crew.lat, lng: crew.lng } : null, driving ? destination : null);
-  const step = stepFor(incident.stage);
+  const { steps, current: step } = progressSteps(incident.stage, incident.updates);
+  const now = useClock(30000);
+  const late = incident.ertDue !== undefined && now > incident.ertDue;
 
   const markers: MapMarker[] = [];
   if (own && point) markers.push({ id: "site", lat: point.lat, lng: point.lng, kind: "incident", label: "Your outage", detail: "Where your technician is heading" });
@@ -61,6 +62,12 @@ export function IncidentTracker({ incident, own = false, point, onUnfollow, labe
             <div className="rounded-md bg-secondary p-3"><p className="text-[10px] font-extrabold uppercase text-muted-foreground">Arrival</p><p className="mt-1 text-xl font-extrabold text-navy">{arrival}</p></div>
             <div className="rounded-md bg-secondary p-3"><p className="text-[10px] font-extrabold uppercase text-muted-foreground">Technician</p><p className="mt-1 text-xl font-extrabold text-navy">{incident.techFirst ?? "Pending"}</p></div>
           </div>
+          {incident.ertDue !== undefined && (
+            <div className={`rounded-md p-3 ${late ? "bg-warning-soft" : "bg-secondary"}`}>
+              <p className="text-[10px] font-extrabold uppercase text-muted-foreground">{incident.stage === STAGE.awaitingParts ? "Parts expected by" : incident.stage >= STAGE.repairing ? "Repair expected by" : "Crew expected on site by"}</p>
+              <p className="mt-1 text-xl font-extrabold text-navy">{clockTime(incident.ertDue)} <span className="text-xs font-bold text-muted-foreground">{late ? "· running late, we will update you" : `· ${dueLabel(incident.ertDue, now)}`}</span></p>
+            </div>
+          )}
           <ol className="space-y-1">
             {steps.map((label, index) => (
               <li key={label} className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs ${index === step ? "bg-secondary font-bold" : ""}`}>
@@ -73,9 +80,11 @@ export function IncidentTracker({ incident, own = false, point, onUnfollow, labe
             <div className="rounded-md border border-border p-3">
               <p className="flex items-center gap-2 text-sm font-extrabold text-navy"><Radio className="size-4 text-primary" /> Live updates</p>
               <ol className="mt-2 max-h-40 space-y-2 overflow-y-auto border-l border-border pl-3">
-                {[...incident.updates].reverse().map((update, index) => (
-                  <li key={index} className="text-xs"><span className="font-bold">{stageLabel(update.stage)}</span> <span className="text-muted-foreground">· {ago(update.at)} ago</span></li>
-                ))}
+                {incident.updates.map((update, index) => {
+                  const repeat = incident.updates[index - 1]?.stage === update.stage;
+                  const label = repeat ? (update.ertDue ? `New expected time · ${clockTime(update.ertDue)}` : `${stageLabel(update.stage)} · status update`) : `${stageLabel(update.stage)}${update.ertDue ? ` · expected by ${clockTime(update.ertDue)}` : ""}`;
+                  return <li key={index} className="text-xs"><span className="font-bold">{label}</span> <span className="text-muted-foreground">· {ago(update.at)} ago</span></li>;
+                }).reverse()}
               </ol>
             </div>
           )}

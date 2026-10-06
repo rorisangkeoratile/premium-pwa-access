@@ -1,9 +1,10 @@
 import type { MockUser, Priority } from "@/components/lesedi/data";
 import { distanceKm } from "@/lib/geo";
-import { HOME_AREA_KM, publicHistory } from "@/lib/incidents";
+import { clockTime } from "@/lib/ert";
+import { HOME_AREA_KM, publicHistory, resolvedAt } from "@/lib/incidents";
 import { formatDuration } from "@/lib/metrics";
 import { areas, type AutoTicket } from "@/lib/nodes";
-import { isHomeOutage, stageNames, toIncident, type Dispatch, type OutageReport } from "@/lib/reports";
+import { STAGE, isHomeOutage, isResolved, stageNames, toIncident, type Dispatch, type OutageReport } from "@/lib/reports";
 import { createStore } from "@/lib/store";
 
 /**
@@ -29,12 +30,16 @@ export function markRead(email: string, notices: Notice[]) {
   noticeSeenStore.set({ ...noticeSeenStore.get(), [email]: newest });
 }
 
-function stageCopy(stage: number, first: string, area: string, source: "citizen" | "auto"): Pick<Notice, "title" | "body" | "tone"> {
+function stageCopy(stage: number, first: string, area: string, source: "citizen" | "auto", ertDue?: number): Pick<Notice, "title" | "body" | "tone"> {
+  const by = ertDue ? ` Expected by ${clockTime(ertDue)}.` : "";
   if (stage === -1) return { title: "Technician assigned", body: `${first} has been assigned to the outage in ${area}.`, tone: "info" };
   if (stage === 0) return { title: `${first} accepted the job`, body: `They are getting ready to head to ${area}.`, tone: "info" };
   if (stage === 1) return { title: `${first} is on the way`, body: "You can follow their live position on your dashboard.", tone: "info" };
   if (stage === 2) return { title: `${first} has arrived`, body: `The repair team is on site in ${area}.`, tone: "info" };
-  if (stage === 3) return { title: "Repair in progress", body: `${first} is fixing the fault in ${area}.`, tone: "info" };
+  if (stage === STAGE.awaitingParts) return { title: "Waiting for parts", body: `${first} found the fault in ${area} and is waiting for parts to arrive.${by}`, tone: "warn" };
+  if (stage === STAGE.repairing) return { title: "Repairs in progress", body: `${first} is fixing the fault in ${area}.${by}`, tone: "info" };
+  if (stage === STAGE.testing) return { title: "Testing the repair", body: `${first} has finished the repair in ${area} and is testing the supply.`, tone: "info" };
+  if (stage === STAGE.closed) return { title: `Incident closed · ${area}`, body: "Thank you. This outage is now closed.", tone: "success" };
   return source === "auto"
     ? { title: `Repair finished in ${area}`, body: `${first} has completed the work. We will confirm once our sensors see the power return.`, tone: "success" }
     : { title: `Power restored in ${area}`, body: `${first} has completed the repair.`, tone: "success" };
@@ -70,7 +75,15 @@ function residentNotices(user: MockUser, world: World): Notice[] {
     } else {
       push("opened", incident.openedAt, { title: `Outage reported in ${area}`, body: atHome ? `A neighbour reported a fault in ${area}, your home area.` : `A fault was reported in ${area}.`, tone: "warn" });
     }
-    for (const update of incident.updates) push(`stage${update.stage}`, update.at, stageCopy(update.stage, first, area, incident.source));
+    // Stage changes and new expected times. The technician's 30-minute status reports stay with the control centre.
+    incident.updates.forEach((update, index) => {
+      const previous = incident.updates[index - 1];
+      if (!previous || previous.stage !== update.stage) push(`stage${update.stage}`, update.at, stageCopy(update.stage, first, area, incident.source, update.ertDue));
+      else if (update.ertDue !== undefined) push("ert", update.at, { title: `New expected time · ${area}`, body: `The work is taking longer than planned. It is now expected to be finished by ${clockTime(update.ertDue)}.`, tone: "warn" });
+    });
+    if (own && incident.closedAt !== undefined && !incident.closed && incident.source === "citizen") {
+      push("feedback", incident.closedAt + 1, { title: "How did we do?", body: "Your outage is resolved. Please rate the service on your dashboard. It helps the city serve you better.", tone: "info" });
+    }
     if (incident.source === "auto" && incident.closedAt !== undefined) {
       push("restored", incident.closedAt, { title: `Power restored in ${area}`, body: `Our sensors confirm the power is back on${atHome ? " at your home area" : ""}.`, tone: "success" });
     }
@@ -111,10 +124,12 @@ function technicianNotices(user: MockUser, world: World): Notice[] {
     const info = describe(id, world);
     if (!info) continue;
     for (const update of dispatch.updates ?? []) {
-      if (update.actor === "control" || (update.stage === -1 && update.actor === undefined)) {
+      if (update.stage === STAGE.assigned && (update.actor === "control" || update.actor === undefined)) {
         out.push({ id: `${id}:assigned:${update.at}`, at: update.at, title: `New job · ${info.place}`, body: `${info.priority} priority · ${info.detail}`, tone: "warn" });
+      } else if (update.actor === "resident" && update.stage === STAGE.closed) {
+        out.push({ id: `${id}:feedback:${update.at}`, at: update.at, title: "The resident gave feedback", body: `${info.place} · ${update.note ?? "Incident closed"}`, tone: "success" });
       } else if (update.actor === "resident") {
-        const fixed = update.stage === 4;
+        const fixed = update.stage === STAGE.resolved;
         out.push({ id: `${id}:resident:${update.at}`, at: update.at, title: fixed ? "Resident confirmed the power is back" : "Resident says the power is still off", body: info.place, tone: fixed ? "success" : "danger" });
       }
     }
@@ -139,11 +154,14 @@ function dispatcherNotices(world: World): Notice[] {
   for (const [id, dispatch] of Object.entries(world.dispatches)) {
     const info = describe(id, world);
     if (!info) continue;
-    for (const update of dispatch.updates ?? []) {
-      const stage = update.stage < 0 ? "assigned" : (stageNames[update.stage] ?? "updated");
+    const first = dispatch.tech.split(" ")[0];
+    (dispatch.updates ?? []).forEach((update, index) => {
+      const stage = update.stage < 0 ? "Assigned" : (stageNames[update.stage] ?? "Updated");
+      const repeat = dispatch.updates?.[index - 1]?.stage === update.stage;
+      const title = update.stage < 0 ? `${first} was assigned` : repeat ? (update.ertDue ? `ERT extended to ${clockTime(update.ertDue)} · ${first}` : `Status report · ${first}`) : `${stage} · ${first}`;
       if (update.flag) out.push({ id: `${id}:flag:${update.at}`, at: update.at, title: `Flag · ${update.flag}`, body: `${dispatch.tech} · ${info.place}`, tone: "danger" });
-      else out.push({ id: `${id}:stage${update.stage}:${update.at}`, at: update.at, title: `${dispatch.tech.split(" ")[0]} ${update.stage < 0 ? "was assigned" : `is ${stage.toLowerCase()}`}`, body: `${id} · ${info.place}`, tone: update.stage === 4 ? "success" : "info" });
-    }
+      else out.push({ id: `${id}:stage${update.stage}:${update.at}`, at: update.at, title, body: `${id} · ${info.place}${update.note && repeat ? ` · ${update.note}` : ""}`, tone: isResolved(update.stage) ? "success" : update.stage === STAGE.awaitingParts || (repeat && update.ertDue) ? "warn" : "info" });
+    });
   }
   return out;
 }
@@ -159,8 +177,8 @@ function managerNotices(world: World): Notice[] {
     const info = describe(report.id, world);
     if (info && !isHomeOutage(report) && (info.priority === "High" || info.priority === "Critical")) out.push({ id: `${report.id}:priority`, at: report.createdAt, title: `${info.priority}-priority report · ${report.id}`, body: info.place, tone: "danger" });
     const dispatch = world.dispatches[report.id];
-    if (dispatch?.stage === 4) {
-      const closedAt = dispatch.updates?.filter((update) => update.stage === 4).at(-1)?.at ?? dispatch.at;
+    if (isResolved(dispatch?.stage)) {
+      const closedAt = resolvedAt(dispatch) ?? report.createdAt;
       out.push({ id: `${report.id}:resolved`, at: closedAt, title: `Resolved · ${report.id}`, body: `${info?.place ?? "Outage location"} · ${formatDuration(closedAt - report.createdAt)} from report to repair.`, tone: "success" });
     }
   }

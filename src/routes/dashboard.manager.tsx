@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Clock3, Download, ShieldCheck, Wallet, Wrench, Zap } from "lucide-react";
+import { Activity, Clock3, Download, MessageSquareHeart, ShieldCheck, Star, Timer, Wallet, Wrench, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { DashboardShell, PageHeading, Stat } from "@/components/lesedi/shell";
@@ -8,10 +8,11 @@ import { LiveMap, crewMarkers, incidentMarkers } from "@/components/lesedi/live-
 import { depotNames, mockUsers, technicians, type MockUser } from "@/components/lesedi/data";
 import { currentUser } from "@/lib/auth";
 import { followStore } from "@/lib/incidents";
+import { RATING_WORDS, feedbackStore } from "@/lib/feedback";
 import { crewStatus, formatDuration, incidentRows, jobsFor, summarise, SLA_RESPONSE_MS } from "@/lib/metrics";
 import { areas, ticketStore, ticketToIncident } from "@/lib/nodes";
 import { onlineEmails, useClock, usePresence } from "@/lib/presence";
-import { crewStore, dispatchStore, reportStore, toIncident } from "@/lib/reports";
+import { crewStore, dispatchStore, isResolved, reportStore, toIncident } from "@/lib/reports";
 
 export const Route = createFileRoute("/dashboard/manager")({
   head: () => ({
@@ -42,11 +43,13 @@ function ManagerDashboard() {
   const crewLocations = crewStore.use();
   const tickets = ticketStore.use();
   const follows = followStore.use();
+  const feedback = feedbackStore.use();
   const presence = usePresence();
   const now = useClock(3000);
   const online = useMemo(() => onlineEmails(presence, now), [presence, now]);
 
-  const rows = useMemo(() => incidentRows(reports, tickets, dispatches, follows), [reports, tickets, dispatches, follows]);
+  const rows = useMemo(() => incidentRows(reports, tickets, dispatches, follows, feedback, now), [reports, tickets, dispatches, follows, feedback, now]);
+  const comments = useMemo(() => Object.values(feedback).sort((a, b) => b.at - a.at).slice(0, 4), [feedback]);
   const summary = useMemo(() => summarise(rows, now), [rows, now]);
   const crew = useMemo(
     () => technicians.map((tech) => ({ tech, ...crewStatus(tech.name, reports, tickets, dispatches), online: online.has(emailByName.get(tech.name) ?? ""), jobs: jobsFor(tech.name, reports, tickets, dispatches) })),
@@ -55,7 +58,7 @@ function ManagerDashboard() {
 
   const markers = useMemo(
     () => [
-      ...incidentMarkers([...tickets.filter((ticket) => !ticket.restoredAt).map(ticketToIncident), ...reports.filter((report) => !report.duplicateOf && dispatches[report.id]?.stage !== 4).map((report) => toIncident(report))]),
+      ...incidentMarkers([...tickets.filter((ticket) => !ticket.restoredAt).map(ticketToIncident), ...reports.filter((report) => !report.duplicateOf && !isResolved(dispatches[report.id]?.stage)).map((report) => toIncident(report))]),
       ...crewMarkers(crew.map((item) => ({ ...item.tech, status: `${item.status}${item.online ? " · online" : " · offline"}` })), crewLocations),
     ],
     [reports, tickets, dispatches, crewLocations, crew],
@@ -86,8 +89,8 @@ function ManagerDashboard() {
     const minutes = (from: number, to: number | undefined) => (to === undefined ? "" : String(Math.round((to - from) / 600) / 100));
     const cell = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
     const lines = [
-      ["Incident", "Source", "Place", "Priority", "Opened", "Minutes to crew on site", "Minutes to resolution", "Technician", "Residents affected", "Flags"].map(cell).join(","),
-      ...rows.map((row) => [row.id, row.source === "auto" ? "Sensor" : row.home ? "Resident (home)" : "Resident", row.place, row.priority, new Date(row.openedAt).toISOString(), minutes(row.openedAt, row.respondedAt), minutes(row.openedAt, row.closedAt), row.tech ?? "", row.affected, row.flags].map(cell).join(",")),
+      ["Incident", "Source", "Place", "Priority", "Opened", "Minutes to crew on site", "On site within 2 h ERT", "Minutes to resolution", "Technician", "Residents affected", "Flags", "Status reports on time", "Status reports late", "Parts/repair deadlines met", "Parts/repair deadlines missed", "ERT extensions", "Resident rating"].map(cell).join(","),
+      ...rows.map((row) => [row.id, row.source === "auto" ? "Sensor" : row.home ? "Resident (home)" : "Resident", row.place, row.priority, new Date(row.openedAt).toISOString(), minutes(row.openedAt, row.respondedAt), row.respondedAt === undefined ? "" : row.respondedAt - row.openedAt <= SLA_RESPONSE_MS ? "Yes" : "No", minutes(row.openedAt, row.closedAt), row.tech ?? "", row.affected, row.flags, row.reportsOnTime, row.reportsLate, row.phasesMet, row.phasesMissed, row.extensions, row.ratings.join(" ")].map(cell).join(",")),
     ];
     const url = URL.createObjectURL(new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
@@ -103,9 +106,16 @@ function ManagerDashboard() {
 
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Live performance">
         <Stat label="Outages today" value={String(summary.openedToday)} note={`${summary.open} still open · live`} icon={Zap} alert={summary.open > 0} />
-        <Stat label="Response time" value={formatDuration(summary.avgResponseMs)} note={`Target: under ${SLA_RESPONSE_MS / 60000} min · live`} icon={Clock3} />
+        <Stat label="Response time" value={formatDuration(summary.avgResponseMs)} note={`ERT: on site within ${SLA_RESPONSE_MS / 3600000} h · live`} icon={Clock3} />
         <Stat label="Resolution time" value={formatDuration(summary.avgResolutionMs)} note={summary.resolved > 0 ? `${summary.resolved} resolved · live` : "Nothing resolved yet · live"} icon={Wrench} />
-        <Stat label="SLA compliance" value={summary.slaPct === undefined ? "—" : `${summary.slaPct}%`} note={`Target: ${SLA_TARGET}% · live`} icon={ShieldCheck} alert={summary.slaPct !== undefined && summary.slaPct < SLA_TARGET} />
+        <Stat label="Within ERT" value={summary.slaPct === undefined ? "—" : `${summary.slaPct}%`} note={`Target: ${SLA_TARGET}% · live`} icon={ShieldCheck} alert={summary.slaPct !== undefined && summary.slaPct < SLA_TARGET} />
+      </section>
+
+      <section className="mt-3 grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Service delivery">
+        <Stat label="Status reports on time" value={summary.reportsPct === undefined ? "—" : `${summary.reportsPct}%`} note={summary.reportsOverdue > 0 ? `${summary.reportsOverdue} overdue right now` : "Every 30 min while a job is open"} icon={Timer} alert={summary.reportsOverdue > 0} />
+        <Stat label="Parts & repair deadlines" value={summary.phasePct === undefined ? "—" : `${summary.phasePct}% met`} note={`${summary.awaitingParts} awaiting parts · ${summary.extensions} ERT extension${summary.extensions === 1 ? "" : "s"}`} icon={Wrench} />
+        <Stat label="Past ERT now" value={String(summary.ertOverdue)} note={summary.ertOverdue > 0 ? "Open incidents running late" : "Every open incident on time"} icon={Clock3} alert={summary.ertOverdue > 0} />
+        <Stat label="Customer satisfaction" value={summary.avgRating === undefined ? "—" : `${summary.avgRating} / 5`} note={summary.ratings > 0 ? `${summary.satisfiedPct}% satisfied · ${summary.ratings} rating${summary.ratings === 1 ? "" : "s"}` : "No feedback yet"} icon={Star} alert={summary.avgRating !== undefined && summary.avgRating < 3.5} />
       </section>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
@@ -145,17 +155,21 @@ function ManagerDashboard() {
         </section>
         <section className="rounded-md border border-border bg-card p-5">
           <h2 className="font-extrabold text-navy">Technician performance</h2>
-          <p className="text-xs text-muted-foreground">Live: jobs completed and time to reach the site</p>
+          <p className="text-xs text-muted-foreground">Live: jobs resolved, time to reach the site, status reports on time and resident rating</p>
           <div className="mt-3 max-h-80 divide-y divide-border overflow-y-auto">
             {performance.map((item, index) => {
               const arrivals = rows.filter((row) => row.tech === item.tech.name && row.respondedAt !== undefined);
               const average = arrivals.length > 0 ? arrivals.reduce((sum, row) => sum + ((row.respondedAt ?? 0) - row.openedAt), 0) / arrivals.length : undefined;
+              const mine = rows.filter((row) => row.tech === item.tech.name);
+              const onTime = mine.reduce((sum, row) => sum + row.reportsOnTime, 0);
+              const allReports = onTime + mine.reduce((sum, row) => sum + row.reportsLate, 0);
+              const ratings = mine.flatMap((row) => row.ratings);
               return (
                 <div key={item.tech.name} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3">
                   <span className="text-xs font-extrabold text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
                   <div className="min-w-0">
                     <p className="flex items-center gap-2 truncate text-sm font-bold"><span title={item.online ? "Online" : "Offline"} className={`size-2 shrink-0 rounded-full ${item.online ? "bg-success" : "bg-muted-foreground/40"}`} />{item.tech.name}</p>
-                    <p className="text-xs text-muted-foreground">{item.jobs.done.length} completed · avg to site {formatDuration(average)}{item.job ? ` · on ${item.job.id}` : ""}</p>
+                    <p className="text-xs text-muted-foreground">{item.jobs.done.length} resolved · avg to site {formatDuration(average)}{allReports > 0 ? ` · reports on time ${Math.round((100 * onTime) / allReports)}%` : ""}{ratings.length > 0 ? ` · ★ ${(ratings.reduce((sum, value) => sum + value, 0) / ratings.length).toFixed(1)}` : ""}{item.job ? ` · on ${item.job.id}` : ""}</p>
                   </div>
                   <span className={`rounded px-2 py-1 text-[10px] font-extrabold uppercase ${item.status === "Available" ? "bg-success-soft text-success" : "bg-warning-soft text-foreground"}`}>{item.status}</span>
                 </div>
@@ -164,6 +178,26 @@ function ManagerDashboard() {
           </div>
         </section>
       </div>
+
+      <section className="mt-5 rounded-md border border-border bg-card p-5" aria-labelledby="voice-title">
+        <div className="flex items-center justify-between">
+          <div><h2 id="voice-title" className="font-extrabold text-navy">Residents' feedback</h2><p className="text-xs text-muted-foreground">Live: what residents said once their outage was resolved</p></div>
+          <MessageSquareHeart className="size-5 text-primary" />
+        </div>
+        {comments.length === 0 ? (
+          <p className="mt-3 text-sm text-muted-foreground">No feedback yet. Residents are asked to rate the service as soon as their outage is resolved.</p>
+        ) : (
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {comments.map((item) => (
+              <div key={item.reportId} className="rounded-md border border-border p-3 text-xs">
+                <p className="flex items-center gap-1 font-bold"><Star className="size-3.5 fill-accent text-accent" /> {item.rating}/5 · {RATING_WORDS[item.rating]} <span className="font-normal text-muted-foreground">· {item.incidentId}</span></p>
+                {item.tags.length > 0 && <p className="mt-1 text-muted-foreground">{item.tags.join(" · ")}{item.keptInformed ? "" : " · Not kept informed"}</p>}
+                {item.comment && <p className="mt-1 italic">“{item.comment}”</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-2">
         <section className="rounded-md border border-border bg-card p-5">
