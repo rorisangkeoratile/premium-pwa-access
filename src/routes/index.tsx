@@ -10,6 +10,7 @@ import { detectPosition } from "@/lib/geo";
 import { dispatchStore, reportStore } from "@/lib/reports";
 import { ticketStore } from "@/lib/nodes";
 import { Logo } from "@/components/lesedi/logo";
+import { ThemeToggle } from "@/components/lesedi/theme-toggle";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -132,6 +133,7 @@ function LandingPage() {
             <p className="text-lg font-extrabold text-navy">Lesedi<span className="text-primary">Link</span></p>
           </div>
           <nav className="flex items-center gap-2">
+            <ThemeToggle />
             <Link to="/login" className="flex min-h-11 items-center px-3 text-sm font-bold text-muted-foreground hover:text-foreground">Login</Link>
             <Link to="/signup" className="hidden min-h-11 items-center px-3 text-sm font-bold text-primary hover:underline sm:flex">Sign up</Link>
             <Button asChild className="min-h-11"><Link to="/login">Report an outage</Link></Button>
@@ -152,11 +154,14 @@ function LandingPage() {
               <Button asChild size="lg" variant="outline" className="min-h-12 border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"><a href="#how-to-use">How it works</a></Button>
             </div>
             <p className="mt-4 text-sm text-primary-foreground/85">New here? <Link to="/signup" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4 hover:text-accent">Create a free account</Link></p>
-            <dl className="mt-10 grid max-w-lg grid-cols-3 gap-4 border-t border-primary-foreground/15 pt-6">
-              {stats.map(([value, label]) => (
-                <div key={label}><dt className="text-2xl font-extrabold"><CountUp value={value} duration={1400} /></dt><dd className="text-xs text-primary-foreground/70">{label}</dd></div>
-              ))}
-            </dl>
+            <div className="mt-10 border-t border-primary-foreground/15 pt-6">
+              <p className="text-[11px] font-bold uppercase text-primary-foreground/50">Typical performance across the network</p>
+              <dl className="mt-3 grid max-w-lg grid-cols-3 gap-4">
+                {stats.map(([value, label]) => (
+                  <div key={label}><dt className="text-2xl font-extrabold"><CountUp value={value} duration={1400} /></dt><dd className="text-xs text-primary-foreground/70">{label}</dd></div>
+                ))}
+              </dl>
+            </div>
           </div>
           <div className="float-slow self-center"><LiveFeed /></div>
         </div>

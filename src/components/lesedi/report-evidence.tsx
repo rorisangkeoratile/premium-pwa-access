@@ -9,7 +9,7 @@ export function ReportEvidence({ report }: { report: OutageReport }) {
     <div className="space-y-3 text-sm">
       <div className="rounded-md bg-secondary p-3">
         <p className="text-[10px] font-extrabold uppercase text-muted-foreground">Reported location</p>
-        <p className="mt-1 font-bold text-navy">{report.address || "Pinned on map"}</p>
+        <p className="mt-1 font-bold text-navy">{report.address || "Outage location"}</p>
         {report.landmark && <p className="text-xs text-muted-foreground">Landmark: {report.landmark}</p>}
         <p className="text-xs text-muted-foreground">
           {report.accuracy ? `GPS detected · accurate to about ${Math.round(report.accuracy)} m` : "Pin placed on the map by the resident"}

@@ -10,6 +10,7 @@ import type { MockUser } from "@/components/lesedi/data";
 import { areas } from "@/lib/nodes";
 import { cancelLogin, currentUser, emailTaken, pendingLogin, startSignup } from "@/lib/auth";
 import { Logo } from "@/components/lesedi/logo";
+import { ThemeToggle } from "@/components/lesedi/theme-toggle";
 
 export const Route = createFileRoute("/signup")({
   head: () => ({
@@ -111,7 +112,10 @@ function SignupPage() {
             <Logo />
             <p className="text-lg font-extrabold text-navy">Lesedi<span className="text-primary">Link</span></p>
           </Link>
-          <Button asChild variant="ghost" className="min-h-11"><Link to="/login"><ArrowLeft /> Back to log in</Link></Button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <Button asChild variant="ghost" className="min-h-11"><Link to="/login"><ArrowLeft /> Back to log in</Link></Button>
+          </div>
         </div>
       </header>
 

@@ -10,6 +10,7 @@ import { currentUser, signOut } from "@/lib/auth";
 import { CountUp } from "@/components/lesedi/motion";
 import { Logo } from "@/components/lesedi/logo";
 import { NotificationBell } from "@/components/lesedi/notification-bell";
+import { ThemeToggle } from "@/components/lesedi/theme-toggle";
 import { statusStore, useNodeEngine } from "@/lib/nodes";
 import { useClock, usePresenceHeartbeat } from "@/lib/presence";
 
@@ -35,6 +36,9 @@ export function DashboardShell({ user, role, home, children }: { user: string; r
   // Every dashboard keeps the simulation alive and announces that it is online. Only one open tab runs the sensors.
   useNodeEngine(allowed);
   usePresenceHeartbeat(allowed ? session : null);
+  // Distinct from "gone stale" (amber, a real warning): a page that has never heard from the sensors yet
+  // is not a problem, so it gets a neutral pill instead of flashing amber on every sign-in.
+  const starting = status.at === 0;
   const live = status.at > 0 && now - status.at < 8000;
 
   function logout() {
@@ -57,11 +61,18 @@ export function DashboardShell({ user, role, home, children }: { user: string; r
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1 sm:gap-3">
-            <div role="status" className={`hidden items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold md:flex ${live ? "bg-success-soft text-success" : "bg-warning-soft text-foreground"}`}><span className={`size-2 rounded-full ${live ? "bg-success" : "bg-warning"}`} />{live ? "All systems live" : "Connecting sensors…"}</div>
+            <div role="status" className={`hidden items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold md:flex ${live ? "bg-success-soft text-success" : starting ? "bg-secondary text-muted-foreground" : "bg-warning-soft text-foreground"}`}>
+              <span className={`size-2 rounded-full ${live ? "bg-success" : starting ? "bg-muted-foreground/50" : "bg-warning"}`} />
+              {live ? "All systems live" : starting ? "Starting…" : "Connecting sensors…"}
+            </div>
+            <ThemeToggle />
             {session && <NotificationBell user={session} />}
-            <div className="hidden items-center gap-2 border-l border-border pl-4 sm:flex">
-              <div className="grid size-9 place-items-center rounded-full bg-secondary text-xs font-extrabold text-primary">{initials}</div>
-              <div><p className="text-xs font-bold">{user}</p><p className="text-[11px] text-muted-foreground">{role}</p></div>
+            <div className="flex items-center gap-2 border-l border-border pl-2 sm:pl-4">
+              <div className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary text-xs font-extrabold text-primary" title={`${user} · ${role}`}>
+                {initials}
+                <span className="sr-only"> — {user}, {role}</span>
+              </div>
+              <div className="hidden sm:block"><p className="text-xs font-bold">{user}</p><p className="text-[11px] text-muted-foreground">{role}</p></div>
             </div>
             <Button variant="outline" className="min-h-11" onClick={logout}><LogOut /> <span className="hidden sm:inline">Log out</span><span className="sr-only sm:hidden">Log out</span></Button>
           </div>

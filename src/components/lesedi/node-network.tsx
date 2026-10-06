@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { CheckCircle2, CloudLightning, Cross, PowerOff, Radio, RotateCcw, School, Store, Trash2, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,11 @@ export function nodeMarkers(states: Record<string, NodeState>): MapMarker[] {
 
 /** Dispatcher panel: the simulated node fleet, the detection rule's live numbers and the demo controls. */
 export function NodeNetworkPanel() {
+  // This panel re-renders every couple of seconds (the clock below, the store subscriptions). Repeatedly
+  // updating a closed <details>'s children confuses some browsers into showing them anyway, so the
+  // controls are only mounted at all once the panel is actually open, rather than left in the DOM and
+  // hidden by CSS.
+  const [expanded, setExpanded] = useState(false);
   const status = statusStore.use();
   const control = controlStore.use();
   const tickets = ticketStore.use();
@@ -37,65 +43,81 @@ export function NodeNetworkPanel() {
   const seconds = status.at > 0 ? Math.max(0, Math.round((now - status.at) / 1000)) : undefined;
   const running = seconds !== undefined && seconds < 8;
 
+  // A one-line rollup for the collapsed view, so the network's health is visible without opening the panel.
+  const health = areas.map((area) => {
+    const info = status.areas[area.id];
+    const open = tickets.some((ticket) => ticket.areaId === area.id && !ticket.restoredAt);
+    return open ? "Outage" : info && info.silent > 0 ? "Degraded" : "Healthy";
+  });
+  const outageCount = health.filter((item) => item === "Outage").length;
+  const degradedCount = health.filter((item) => item === "Degraded").length;
+  const rollup = outageCount > 0 ? `${outageCount} area${outageCount === 1 ? "" : "s"} with an outage` : degradedCount > 0 ? `${degradedCount} area${degradedCount === 1 ? "" : "s"} degraded` : `all ${areas.length} areas healthy`;
+
   return (
     <section className="rounded-md border border-border bg-card" aria-labelledby="nodes-title">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-4">
-        <div className="max-w-2xl">
-          <h2 id="nodes-title" className="flex items-center gap-2 font-extrabold text-navy"><Radio className="size-4 text-primary" /> Sensor node network <span className="rounded bg-warning-soft px-2 py-0.5 text-[10px] font-extrabold uppercase text-foreground">Simulated</span></h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {nodeDefs.length} nodes at clinics, schools and spaza shops send a heartbeat every {HEARTBEAT_MS / 1000} s. A node with no power cannot speak, so missing heartbeats are the signal. An outage ticket opens when at least {SILENT_SHARE * 100}% of an area&apos;s nodes are silent, at least {ELSEWHERE_ONLINE_SHARE * 100}% of the other nodes are still online, and the check matches {STREAK_NEEDED} times in a row. Real devices belong to the pilot phase.
-          </p>
-          <p role="status" className={`mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-bold ${running ? "bg-success-soft text-success" : "bg-warning-soft text-foreground"}`}>
-            <span className={`size-2 rounded-full ${running ? "bg-success" : "bg-warning"}`} />
-            {running ? `Sensors checked ${seconds} s ago · the simulation runs in whichever dashboard window is open` : "Sensor engine starting… keep at least one dashboard window open"}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" className="min-h-11" onClick={stormScenario}><CloudLightning /> Storm: cut 3 areas</Button>
-          <Button variant="outline" size="sm" className="min-h-11" onClick={restoreAllPower}><RotateCcw /> Restore all power</Button>
-          <Button variant="destructive" size="sm" className="min-h-11" onClick={() => { if (window.confirm("Clear every report, job and outage in the simulation, in every open window?")) resetSimulation(); }}><Trash2 /> Reset simulation</Button>
-        </div>
+      <div className="border-b border-border p-4">
+        <h2 id="nodes-title" className="flex items-center gap-2 font-extrabold text-navy"><Radio className="size-4 text-primary" /> Sensor node network <span className="rounded bg-warning-soft px-2 py-0.5 text-[10px] font-extrabold uppercase text-foreground">Simulated</span></h2>
+        <p role="status" className={`mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-bold ${running ? "bg-success-soft text-success" : "bg-warning-soft text-foreground"}`}>
+          <span className={`size-2 rounded-full ${running ? "bg-success" : "bg-warning"}`} />
+          {running ? `Sensors checked ${seconds} s ago · ${rollup}` : "Sensor engine starting… keep at least one dashboard window open"}
+        </p>
       </div>
 
-      <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
-        {areas.map((area) => {
-          const info = status.areas[area.id];
-          const cut = control.cut.includes(area.id);
-          const hasBroken = control.broken.some((id) => nodeDefs.find((node) => node.id === id)?.areaId === area.id);
-          const open = tickets.find((ticket) => ticket.areaId === area.id && !ticket.restoredAt);
-          const health = open ? "Outage" : info && info.silent > 0 ? "Degraded" : "Healthy";
-          const healthStyle = open ? "bg-destructive text-destructive-foreground" : health === "Degraded" ? "bg-warning-soft text-foreground" : "bg-success-soft text-success";
-          return (
-            <div key={area.id} className="rounded-md border border-border p-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="truncate text-sm font-extrabold text-navy">{area.name}</p>
-                <span className={`rounded px-2 py-1 text-[10px] font-extrabold uppercase ${healthStyle}`}>{health}</span>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {nodeDefs.filter((node) => node.areaId === area.id).map((node) => {
-                  const state = status.nodes[node.id] ?? "online";
-                  const Icon = siteIcon[node.site];
-                  return (
-                    <span key={node.id} title={`${node.name} · ${node.site} · ${stateLabel[state]}`} className={`grid size-8 place-items-center rounded text-primary-foreground ${stateStyle[state]}`}>
-                      <Icon className="size-4" aria-hidden="true" />
-                      <span className="sr-only">{node.name}, {node.site}, {stateLabel[state]}</span>
-                    </span>
-                  );
-                })}
-              </div>
-              <p className="mt-3 text-[11px] text-muted-foreground">
-                {info ? `${info.silent} of ${info.total} silent · rest of network ${Math.round(info.elsewhereOnline * 100)}% online · match ${info.streak}/${STREAK_NEEDED}` : "Waiting for first check…"}
-              </p>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                {cut
-                  ? <Button size="sm" className="min-h-11" onClick={() => restorePower(area.id)}><Zap /> Restore power</Button>
-                  : <Button size="sm" variant="destructive" className="min-h-11" onClick={() => cutPower(area.id)}><PowerOff /> Cut power</Button>}
-                <Button size="sm" variant="outline" className="min-h-11" disabled={cut} onClick={() => toggleBrokenNode(area.id)}>{hasBroken ? "Repair node" : "Break 1 node"}</Button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {/* Node-by-node detail and the "Cut power" / "Break node" simulation controls are one tap away, not
+          sitting inline with the dispatcher's real work every time this panel is on screen. */}
+      <details className="border-b border-border" onToggle={(event) => setExpanded(event.currentTarget.open)}>
+        <summary className="min-h-11 cursor-pointer p-4 text-sm font-extrabold text-navy">Node detail and simulation controls</summary>
+        {expanded && (
+        <div className="space-y-4 px-4 pb-4">
+          <p className="text-xs text-muted-foreground">
+            {nodeDefs.length} nodes at clinics, schools and spaza shops send a heartbeat every {HEARTBEAT_MS / 1000} s. A node with no power cannot speak, so missing heartbeats are the signal. An outage ticket opens when at least {SILENT_SHARE * 100}% of an area&apos;s nodes are silent, at least {ELSEWHERE_ONLINE_SHARE * 100}% of the other nodes are still online, and the check matches {STREAK_NEEDED} times in a row. Real devices belong to the pilot phase.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" className="min-h-11" onClick={stormScenario}><CloudLightning /> Storm: cut 3 areas</Button>
+            <Button variant="outline" size="sm" className="min-h-11" onClick={restoreAllPower}><RotateCcw /> Restore all power</Button>
+            <Button variant="destructive" size="sm" className="min-h-11" onClick={() => { if (window.confirm("Clear every report, job and outage in the simulation, in every open window?")) resetSimulation(); }}><Trash2 /> Reset simulation</Button>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {areas.map((area, index) => {
+              const info = status.areas[area.id];
+              const cut = control.cut.includes(area.id);
+              const hasBroken = control.broken.some((id) => nodeDefs.find((node) => node.id === id)?.areaId === area.id);
+              const healthStyle = health[index] === "Outage" ? "bg-destructive text-destructive-foreground" : health[index] === "Degraded" ? "bg-warning-soft text-foreground" : "bg-success-soft text-success";
+              return (
+                <div key={area.id} className="rounded-md border border-border p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="truncate text-sm font-extrabold text-navy">{area.name}</p>
+                    <span className={`rounded px-2 py-1 text-[10px] font-extrabold uppercase ${healthStyle}`}>{health[index]}</span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {nodeDefs.filter((node) => node.areaId === area.id).map((node) => {
+                      const state = status.nodes[node.id] ?? "online";
+                      const Icon = siteIcon[node.site];
+                      return (
+                        <span key={node.id} title={`${node.name} · ${node.site} · ${stateLabel[state]}`} className={`grid size-8 place-items-center rounded text-primary-foreground ${stateStyle[state]}`}>
+                          <Icon className="size-4" aria-hidden="true" />
+                          <span className="sr-only">{node.name}, {node.site}, {stateLabel[state]}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-3 text-[11px] text-muted-foreground">
+                    {info ? `${info.silent} of ${info.total} silent · rest of network ${Math.round(info.elsewhereOnline * 100)}% online · match ${info.streak}/${STREAK_NEEDED}` : "Waiting for first check…"}
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {cut
+                      ? <Button size="sm" className="min-h-11" onClick={() => restorePower(area.id)}><Zap /> Restore power</Button>
+                      : <Button size="sm" variant="destructive" className="min-h-11" onClick={() => cutPower(area.id)}><PowerOff /> Cut power</Button>}
+                    <Button size="sm" variant="outline" className="min-h-11" disabled={cut} onClick={() => toggleBrokenNode(area.id)}>{hasBroken ? "Repair node" : "Break 1 node"}</Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        )}
+      </details>
 
       {restored.length > 0 && (
         <div className="border-t border-border p-4">

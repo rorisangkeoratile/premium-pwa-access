@@ -36,7 +36,8 @@ export function areaLabel(address: string): string {
     .map((part) => part.trim())
     .filter((part) => part && !/^\d/.test(part) && !/^[\d\s-]+$/.test(part));
   const areas = parts.filter((part) => !ADMIN.test(part) && !STREET.test(part));
-  return areas[0] ?? parts.find((part) => !STREET.test(part)) ?? "your area";
+  // "your area" would be wrong here: this label is also shown to neighbours about someone else's report.
+  return areas[0] ?? parts.find((part) => !STREET.test(part)) ?? "Tshwane";
 }
 
 export type PublicUpdate = { stage: number; at: number };

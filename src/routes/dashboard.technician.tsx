@@ -45,7 +45,9 @@ function TechnicianDashboard() {
 
   const [photo, setPhoto] = useState(false);
   const [notes, setNotes] = useState("");
-  const [checked, setChecked] = useState<string[]>(["Isolation confirmed"]);
+  // Starts empty and resets for each new job: a safety check the technician did not actually tick is not a
+  // safety check, and it must not carry over from the last job.
+  const [checked, setChecked] = useState<string[]>([]);
   const [simulating, setSimulating] = useState(false);
   const simTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const simulatingRef = useRef(false);
@@ -81,6 +83,9 @@ function TechnicianDashboard() {
   const activeIncident = active ? incidentOf(active) : undefined;
   const activeDispatch = active?.dispatch;
   const stage = activeDispatch ? (activeDispatch.stage ?? -1) : -1;
+
+  // A fresh checklist for each job: ticks from the last job must never look like progress on this one.
+  useEffect(() => setChecked([]), [active?.id]);
 
   const shared = crewLocations[ME];
   const position = shared ?? (fix ? { lat: fix.lat, lng: fix.lng } : base ? { lat: base.lat, lng: base.lng } : TSHWANE);
@@ -201,7 +206,7 @@ function TechnicianDashboard() {
         <Stat label="Jobs today" value={`${openJobs.length} open`} note={`${doneToday.length} completed today`} icon={ClipboardList} />
         <Stat label="Current ETA" value={active ? etaLabel : "—"} note={active ? (route ? `${distanceLabel} by road${route.source === "estimate" ? " (estimate)" : ""}` : "Finding route…") : "No job assigned"} icon={Navigation} />
         <Stat label="Time on job" value={activeDispatch ? ago(activeDispatch.at) : "—"} note={activeDispatch ? "Since assigned" : "Standing by"} icon={Clock3} />
-        <Stat label="Safety checks" value={`${checked.length} / 4`} note="Complete before energising" icon={HardHat} alert={Boolean(active) && checked.length < 4} />
+        <Stat label="Safety checks" value={active ? `${checked.length} / 4` : "—"} note={active ? "Complete before energising" : "No job assigned"} icon={HardHat} alert={Boolean(active) && checked.length < 4} />
       </section>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_.7fr]">
@@ -271,7 +276,7 @@ function TechnicianDashboard() {
               <>
                 <p className="mt-4 text-[10px] font-extrabold uppercase text-muted-foreground">Completed today</p>
                 <ul className="mt-2 space-y-1 text-xs">
-                  {doneToday.slice(0, 5).map((job) => <li key={job.id} className="flex items-center gap-2"><CheckCircle2 className="size-4 text-success" /><strong>{job.id}</strong> {job.ticket?.areaName ?? job.report?.address.split(",")[0] ?? "Pinned location"} · {ago(closedAt(job))} ago</li>)}
+                  {doneToday.slice(0, 5).map((job) => <li key={job.id} className="flex items-center gap-2"><CheckCircle2 className="size-4 text-success" /><strong>{job.id}</strong> {job.ticket?.areaName ?? job.report?.address.split(",")[0] ?? "Outage location"} · {ago(closedAt(job))} ago</li>)}
                 </ul>
               </>
             )}

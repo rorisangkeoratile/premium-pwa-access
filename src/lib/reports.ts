@@ -120,7 +120,7 @@ export function toIncident(report: OutageReport, linked = 0, followers = 0): Inc
   const affected = 1 + linked + followers;
   return {
     id: report.id,
-    place: report.address || "Pinned location",
+    place: report.address || "Outage location",
     detail: report.description ? `${report.type} · ${report.description}` : report.type,
     // Reports saved before the outage types changed keep their old type text, so fall back to Medium.
     priority: escalate(priorityByType[report.type] ?? "Medium", affected),

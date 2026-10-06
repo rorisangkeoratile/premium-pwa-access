@@ -9,6 +9,7 @@ import { OtpStep } from "@/components/lesedi/otp-step";
 import { mockUsers, type MockUser } from "@/components/lesedi/data";
 import { QUICK_LOGIN_ENABLED, cancelLogin, currentUser, pendingLogin, startLogin, startQuickLogin } from "@/lib/auth";
 import { Logo } from "@/components/lesedi/logo";
+import { ThemeToggle } from "@/components/lesedi/theme-toggle";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -82,7 +83,10 @@ function LoginPage() {
             <Logo />
             <p className="text-lg font-extrabold text-navy">Lesedi<span className="text-primary">Link</span></p>
           </Link>
-          <Button asChild variant="ghost" className="min-h-11"><Link to="/"><ArrowLeft /> Back to home</Link></Button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <Button asChild variant="ghost" className="min-h-11"><Link to="/"><ArrowLeft /> Back to home</Link></Button>
+          </div>
         </div>
       </header>
 
@@ -111,8 +115,11 @@ function LoginPage() {
             </form>
 
             {QUICK_LOGIN_ENABLED && (
-              <section className="mt-6 space-y-5" aria-labelledby="quick-login-heading">
-                <h2 id="quick-login-heading" className="text-[11px] font-extrabold uppercase text-muted-foreground">Quick tap login</h2>
+              // Collapsed by default: this is a demo convenience, not part of the real sign-in flow, and it
+              // should not outweigh the actual login form on the page.
+              <details className="mt-6 rounded-md border border-dashed border-border p-4">
+                <summary className="min-h-8 cursor-pointer text-[11px] font-extrabold uppercase text-muted-foreground">Demo accounts · quick tap login</summary>
+                <div className="mt-4 space-y-5">
                 {quickGroups.map((group) => (
                   <div key={group.title}>
                     <h3 className="text-xs font-extrabold text-navy">{group.title}</h3>
@@ -129,7 +136,8 @@ function LoginPage() {
                     </div>
                   </div>
                 ))}
-              </section>
+                </div>
+              </details>
             )}
           </>
         )}

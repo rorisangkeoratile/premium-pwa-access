@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { registerGridGuardPwa } from "../lib/register-pwa";
+import { STORAGE_KEY as THEME_STORAGE_KEY } from "../lib/theme";
 import { Button } from "../components/ui/button";
 
 function NotFoundComponent() {
@@ -105,8 +106,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    // suppressHydrationWarning: the theme script below sets the "dark" class on this element from
+    // localStorage before React hydrates, which the server has no way to know in advance. Without this,
+    // React treats every dark-mode page load as a hydration failure and re-renders the whole app from
+    // scratch on the client.
+    <html lang="en" suppressHydrationWarning>
       <head>
+        {/* Applies the saved (or system) theme before hydration, so there is no flash of the wrong one. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var k=${JSON.stringify(THEME_STORAGE_KEY)},t=localStorage.getItem(k);if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.classList.add("dark")}catch(e){}`,
+          }}
+        />
         <HeadContent />
       </head>
       <body>

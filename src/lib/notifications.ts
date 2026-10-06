@@ -99,7 +99,7 @@ function describe(id: string, world: World): { place: string; priority: Priority
   const report = world.reports.find((item) => item.id === id);
   if (report) {
     const incident = toIncident(report);
-    return { place: report.address ? shortAddress(report.address) : "Pinned location", priority: incident.priority, detail: incident.detail };
+    return { place: report.address ? shortAddress(report.address) : "Outage location", priority: incident.priority, detail: incident.detail };
   }
   return undefined;
 }
@@ -127,7 +127,7 @@ function dispatcherNotices(world: World): Notice[] {
   for (const report of world.reports) {
     const info = describe(report.id, world);
     if (report.duplicateOf) {
-      out.push({ id: `${report.id}:merged`, at: report.createdAt, title: `Duplicate report merged into ${report.duplicateOf}`, body: report.address ? shortAddress(report.address) : "Pinned location", tone: "info" });
+      out.push({ id: `${report.id}:merged`, at: report.createdAt, title: `Duplicate report merged into ${report.duplicateOf}`, body: report.address ? shortAddress(report.address) : "Outage location", tone: "info" });
     } else if (info) {
       out.push({ id: `${report.id}:new`, at: report.createdAt, title: `${isHomeOutage(report) ? "Home outage reported" : "New report"} · ${report.id}`, body: `${report.type} · ${info.place}`, tone: info.priority === "High" || info.priority === "Critical" ? "danger" : "warn" });
     }
@@ -161,7 +161,7 @@ function managerNotices(world: World): Notice[] {
     const dispatch = world.dispatches[report.id];
     if (dispatch?.stage === 4) {
       const closedAt = dispatch.updates?.filter((update) => update.stage === 4).at(-1)?.at ?? dispatch.at;
-      out.push({ id: `${report.id}:resolved`, at: closedAt, title: `Resolved · ${report.id}`, body: `${info?.place ?? "Pinned location"} · ${formatDuration(closedAt - report.createdAt)} from report to repair.`, tone: "success" });
+      out.push({ id: `${report.id}:resolved`, at: closedAt, title: `Resolved · ${report.id}`, body: `${info?.place ?? "Outage location"} · ${formatDuration(closedAt - report.createdAt)} from report to repair.`, tone: "success" });
     }
   }
   for (const [id, dispatch] of Object.entries(world.dispatches)) {

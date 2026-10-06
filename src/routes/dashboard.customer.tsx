@@ -15,6 +15,7 @@ import { MAX_PHOTOS, MAX_VIDEO_MB, compressPhoto } from "@/lib/media";
 import { findDuplicate, type DuplicateMatch } from "@/lib/dedup";
 import { areas, ticketStore } from "@/lib/nodes";
 import { HOME_AREA_KM, NEARBY_KM, follow, followStore, isFollowing, nearbyIncidents, publicHistory, publicIncidents, unfollow } from "@/lib/incidents";
+import { nearestArea } from "@/lib/metrics";
 import { HOME_OUTAGE, addReport, ago, dispatchStore, isHomeOutage, nextReportId, profileStore, reportStore, setReportVideo, type OutageReport, type OutageType } from "@/lib/reports";
 
 export const Route = createFileRoute("/dashboard/customer")({
@@ -185,9 +186,10 @@ function CustomerDashboard() {
       id: nextReportId(),
       createdAt: Date.now(),
       reporter: me?.name ?? "Resident",
-      // If the address lookup failed, a home outage still gets the resident's own suburb (they are at home). Anything
-      // else stays blank rather than guessing, and shows as "Pinned on map".
-      address: address || (outageType === HOME_OUTAGE ? me?.area : undefined) || "",
+      // If the address lookup hasn't resolved by the time the resident submits (a slow connection, or a fast
+      // tap): a home outage gets the resident's own suburb (they are at home); anything else gets the nearest
+      // known area, clearly marked "Near X" so it reads as a rough guess rather than a confirmed address.
+      address: address || (outageType === HOME_OUTAGE ? me?.area : undefined) || (nearestArea(pin) ? `Near ${nearestArea(pin)!.name}` : ""),
       ...(landmark.trim() ? { landmark: landmark.trim() } : {}),
       ...(meter ? { account: meter } : {}),
       contact: phone.trim(),
@@ -330,7 +332,7 @@ function CustomerDashboard() {
       <section className="mt-5 overflow-hidden rounded-md border border-border bg-navy-gradient text-primary-foreground" aria-labelledby="existing-title">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 pt-4">
           <p className="text-[10px] font-extrabold uppercase text-primary-foreground/60">Existing report</p>
-          <p className="min-w-0 truncate text-xs text-primary-foreground/60">{latest ? `${latest.address || "Pinned location"}${latest.duplicateOf ? ` · merged into ${latest.duplicateOf}` : ""}` : "Mamelodi East"}</p>
+          <p className="min-w-0 truncate text-xs text-primary-foreground/60">{latest ? `${latest.address || "Outage location"}${latest.duplicateOf ? ` · merged into ${latest.duplicateOf}` : ""}` : "Mamelodi East"}</p>
         </div>
         <h2 id="existing-title" className="px-4 text-lg font-extrabold">{latest ? `${latest.id} · ${latest.type}` : "#LL-4792 · Mamelodi East"}</h2>
         <p className="px-4 text-xs text-primary-foreground/70">{stepNote}</p>

@@ -53,7 +53,7 @@ export function incidentRows(reports: OutageReport[], tickets: AutoTicket[], dis
         id: report.id,
         source: "citizen",
         home: isHomeOutage(report),
-        place: report.address || "Pinned location",
+        place: report.address || "Outage location",
         priority: toIncident(report, linked, followers).priority,
         openedAt: report.createdAt,
         respondedAt: firstAt(dispatch, 2),
