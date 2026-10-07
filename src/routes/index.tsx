@@ -87,7 +87,7 @@ function LiveFeed() {
   const visible = nearby.length <= 3 ? nearby : [0, 1, 2].map((offset) => nearby[(start + offset) % nearby.length]!);
 
   return (
-    <div className="rounded-xl border border-primary-foreground/15 bg-navy/70 p-5 shadow-2xl shadow-black/20 backdrop-blur-md">
+    <div className="rounded-xl border border-primary-foreground/15 bg-black/35 p-5 shadow-2xl shadow-black/20 backdrop-blur-md">
       <p className="flex items-center gap-2 text-xs font-extrabold uppercase text-primary-foreground/70"><span className="relative flex size-2.5"><span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-70" /><span className="relative inline-flex size-2.5 rounded-full bg-success" /></span> Live incident feed · within {FEED_RADIUS_KM} km</p>
 
       {!fix ? (

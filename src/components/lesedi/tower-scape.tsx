@@ -74,9 +74,9 @@ function wires(towers: Built[]): string[] {
 type Layer = { towers: Pylon[]; stroke: string; opacity: number; line: number; depth: number; pulses: boolean };
 
 const LAYERS: Layer[] = [
-  { towers: [-40, 170, 380, 590, 800, 1010, 1220].map((cx) => ({ cx, base: 500, height: 130, width: 44 })), stroke: "oklch(0.85 0.05 240)", opacity: 0.16, line: 1, depth: 6, pulses: false },
-  { towers: [60, 470, 880, 1290].map((cx) => ({ cx, base: 545, height: 250, width: 88 })), stroke: "oklch(0.88 0.04 240)", opacity: 0.3, line: 1.4, depth: 14, pulses: true },
-  { towers: [640, 1160].map((cx) => ({ cx, base: 640, height: 500, width: 190 })), stroke: "oklch(0.93 0.03 240)", opacity: 0.55, line: 2.6, depth: 26, pulses: true },
+  { towers: [-40, 170, 380, 590, 800, 1010, 1220].map((cx) => ({ cx, base: 500, height: 130, width: 44 })), stroke: "oklch(0.88 0.04 150)", opacity: 0.16, line: 1, depth: 6, pulses: false },
+  { towers: [60, 470, 880, 1290].map((cx) => ({ cx, base: 545, height: 250, width: 88 })), stroke: "oklch(0.9 0.035 150)", opacity: 0.3, line: 1.4, depth: 14, pulses: true },
+  { towers: [640, 1160].map((cx) => ({ cx, base: 640, height: 500, width: 190 })), stroke: "oklch(0.95 0.02 150)", opacity: 0.55, line: 2.6, depth: 26, pulses: true },
 ];
 
 /**
@@ -118,12 +118,12 @@ export function TowerScape({ className = "" }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 1200 640" preserveAspectRatio="xMaxYMax slice" aria-hidden="true" focusable="false">
       <defs>
-        <linearGradient id="hill-far" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="oklch(0.3 0.08 252)" stopOpacity="0.55" /><stop offset="1" stopColor="oklch(0.2 0.06 254)" stopOpacity="0.9" /></linearGradient>
-        <linearGradient id="hill-near" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="oklch(0.24 0.07 252)" stopOpacity="0.85" /><stop offset="1" stopColor="oklch(0.17 0.05 255)" /></linearGradient>
+        <linearGradient id="hill-far" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="oklch(0.3 0.07 153)" stopOpacity="0.55" /><stop offset="1" stopColor="oklch(0.2 0.05 155)" stopOpacity="0.9" /></linearGradient>
+        <linearGradient id="hill-near" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="oklch(0.24 0.06 153)" stopOpacity="0.85" /><stop offset="1" stopColor="oklch(0.16 0.04 156)" /></linearGradient>
       </defs>
 
       {Array.from({ length: 26 }, (_, i) => (
-        <circle key={i} className="spark" cx={(i * 197) % 1200} cy={((i * 83) % 260) + 12} r={i % 3 === 0 ? 1.6 : 1} fill="oklch(0.95 0.03 230)" style={{ animationDelay: `${(i % 9) * 0.7}s` }} />
+        <circle key={i} className="spark" cx={(i * 197) % 1200} cy={((i * 83) % 260) + 12} r={i % 3 === 0 ? 1.6 : 1} fill="oklch(0.97 0.02 120)" style={{ animationDelay: `${(i % 9) * 0.7}s` }} />
       ))}
 
       <path d="M0 470C160 430 300 455 470 425S800 395 1000 430 1150 450 1200 440V640H0Z" fill="url(#hill-far)" />
@@ -138,11 +138,11 @@ export function TowerScape({ className = "" }: { className?: string }) {
               {lines.map((d, i) => <path key={`w${i}`} d={d} strokeWidth={Math.max(0.8, layer.line * 0.55)} />)}
             </g>
             {layer.pulses && (
-              <g fill="none" strokeLinecap="round" stroke="oklch(0.85 0.15 60)" strokeWidth={Math.max(1.4, layer.line * 0.9)} opacity={Math.min(1, layer.opacity + 0.35)}>
+              <g fill="none" strokeLinecap="round" stroke="oklch(0.85 0.15 88)" strokeWidth={Math.max(1.4, layer.line * 0.9)} opacity={Math.min(1, layer.opacity + 0.35)}>
                 {lines.map((d, i) => <path key={`p${i}`} d={d} pathLength={100} className="wire-pulse" style={{ animationDelay: `${(i % 6) * 0.7}s`, animationDuration: `${3.6 + (i % 4) * 0.6}s` }} />)}
               </g>
             )}
-            {towers.map((tower, i) => <circle key={`b${i}`} className="beacon" cx={tower.top[0]} cy={tower.top[1]} r={layer.line * 1.6} fill="oklch(0.72 0.2 30)" style={{ animationDelay: `${(i % 4) * 0.6}s` }} />)}
+            {towers.map((tower, i) => <circle key={`b${i}`} className="beacon" cx={tower.top[0]} cy={tower.top[1]} r={layer.line * 1.6} fill="oklch(0.84 0.16 85)" style={{ animationDelay: `${(i % 4) * 0.6}s` }} />)}
           </g>
         );
       })}

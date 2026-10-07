@@ -51,7 +51,7 @@ export function DashboardShell({ user, role, home, children }: { user: string; r
   return (
     <div className="min-h-dvh bg-background">
       <a href="#workspace" className="sr-only z-50 bg-primary p-3 text-primary-foreground focus:not-sr-only focus:fixed focus:left-3 focus:top-3">Skip to workspace</a>
-      <header className="sticky top-0 z-40 border-b border-border bg-card after:pointer-events-none after:absolute after:inset-x-0 after:bottom-[-1px] after:h-[2px] after:bg-[linear-gradient(90deg,transparent,oklch(0.55_0.15_250),oklch(0.72_0.19_46),transparent)] after:opacity-70">
+      <header className="sticky top-0 z-40 border-b border-border bg-card after:pointer-events-none after:absolute after:inset-x-0 after:bottom-[-1px] after:h-[2px] after:bg-[linear-gradient(90deg,transparent,oklch(0.5_0.13_150),oklch(0.8_0.15_85),transparent)] after:opacity-70">
         <div className="mx-auto grid h-16 max-w-[1600px] grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 lg:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <Logo />
