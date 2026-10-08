@@ -6,6 +6,7 @@ import { formatDuration } from "@/lib/metrics";
 import { areas, type AutoTicket } from "@/lib/nodes";
 import { STAGE, isHomeOutage, isResolved, stageNames, toIncident, type Dispatch, type OutageReport } from "@/lib/reports";
 import { createStore } from "@/lib/store";
+import { declinedBy, helpersOf, type CrewRequest } from "@/lib/crew-requests";
 
 /**
  * Alerts, worked out from the shared simulation state rather than stored. Every open dashboard sees the same
@@ -16,9 +17,17 @@ import { createStore } from "@/lib/store";
  * Soshanguve resident visiting Mamelodi still hears about a Soshanguve outage. Residents are only ever
  * shown the public view of an incident (area, status, first name of the technician).
  */
-export type Notice = { id: string; at: number; title: string; body: string; tone: "info" | "success" | "warn" | "danger" };
+export type Notice = {
+  id: string;
+  at: number;
+  title: string;
+  body: string;
+  tone: "info" | "success" | "warn" | "danger";
+  /** A request for more crew this technician can accept or decline straight from the alert. */
+  crewRequest?: string | undefined;
+};
 
-export type World = { reports: OutageReport[]; tickets: AutoTicket[]; dispatches: Record<string, Dispatch>; follows: Record<string, string[]> };
+export type World = { reports: OutageReport[]; tickets: AutoTicket[]; dispatches: Record<string, Dispatch>; follows: Record<string, string[]>; crewRequests: Record<string, CrewRequest> };
 
 /** When each user last marked their alerts as read, keyed by email. */
 export const noticeSeenStore = createStore<Record<string, number>>("lesedilink.notice-seen", {});
@@ -95,7 +104,7 @@ function residentNotices(user: MockUser, world: World): Notice[] {
     if (!dispatch) continue;
     const tech = dispatch.tech.split(" ")[0] ?? "The technician";
     if (dispatch.arrival && dispatch.pin) {
-      out.push({ id: `${report.id}:pin:${dispatch.arrival.at}`, at: dispatch.arrival.at, title: `${tech} is at your gate`, body: "Your Visit PIN is ready on your dashboard. Read it out only to the technician in front of you.", tone: "warn" });
+      out.push({ id: `${report.id}:pin:${dispatch.arrival.at}`, at: dispatch.arrival.at, title: `${tech} is at your gate`, body: "Ask them for their Visit code and enter it on your dashboard. Only open the gate once it matches.", tone: "warn" });
     }
     if (dispatch.completion) {
       out.push({ id: `${report.id}:confirm:${dispatch.completion.requestedAt}`, at: dispatch.completion.requestedAt, title: "Is your power back on?", body: `${tech} says the repair is finished. Please confirm on your dashboard.`, tone: "warn" });
@@ -128,10 +137,37 @@ function technicianNotices(user: MockUser, world: World): Notice[] {
         out.push({ id: `${id}:assigned:${update.at}`, at: update.at, title: `New job · ${info.place}`, body: `${info.priority} priority · ${info.detail}`, tone: "warn" });
       } else if (update.actor === "resident" && update.stage === STAGE.closed) {
         out.push({ id: `${id}:feedback:${update.at}`, at: update.at, title: "The resident gave feedback", body: `${info.place} · ${update.note ?? "Incident closed"}`, tone: "success" });
+      } else if (update.actor === "resident" && update.stage === STAGE.onSite) {
+        out.push({ id: `${id}:verified:${update.at}`, at: update.at, title: "The resident checked your Visit code", body: `${info.place} · you can start work`, tone: "success" });
       } else if (update.actor === "resident") {
         const fixed = update.stage === STAGE.resolved;
         out.push({ id: `${id}:resident:${update.at}`, at: update.at, title: fixed ? "Resident confirmed the power is back" : "Resident says the power is still off", body: info.place, tone: fixed ? "success" : "danger" });
       }
+    }
+  }
+  out.push(...crewNoticesFor(user.name, world));
+  return out;
+}
+
+const firstName = (name: string) => name.split(" ")[0] ?? name;
+
+/** Requests for more crew: the ask to every other technician, and the answers back to the one who asked. */
+function crewNoticesFor(me: string, world: World): Notice[] {
+  const out: Notice[] = [];
+  for (const request of Object.values(world.crewRequests)) {
+    const place = describe(request.jobId, world)?.place ?? "Outage location";
+    if (request.by !== me) {
+      out.push({ id: `${request.id}:asked`, at: request.at, title: `Crew needed · ${place}`, body: `${request.by} needs ${request.needed} more technician${request.needed === 1 ? "" : "s"}: ${request.reason}. Accept or decline.`, tone: "danger", crewRequest: request.id });
+      const mine = request.responses[me];
+      if (mine?.answer === "accepted" && request.closedAt && !mine.leftAt) out.push({ id: `${request.id}:cancelled`, at: request.closedAt, title: "Help no longer needed", body: `${firstName(request.by)} cancelled the request at ${place}.`, tone: "info" });
+      continue;
+    }
+    for (const [name, response] of Object.entries(request.responses)) {
+      const first = firstName(name);
+      if (response.answer === "declined") out.push({ id: `${request.id}:${name}:declined`, at: response.at, title: `${first} can't help`, body: `${name} declined your request for more crew at ${place}.`, tone: "info" });
+      else out.push({ id: `${request.id}:${name}:accepted`, at: response.at, title: `${first} is coming to help`, body: `${name} accepted your request. Their ETA is on your dashboard.`, tone: "success" });
+      if (response.arrivedAt) out.push({ id: `${request.id}:${name}:arrived`, at: response.arrivedAt, title: `${first} has arrived to help`, body: place, tone: "success" });
+      if (response.leftAt) out.push({ id: `${request.id}:${name}:left`, at: response.leftAt, title: `${first} can no longer help`, body: `Your request at ${place} is open again for someone else.`, tone: "warn" });
     }
   }
   return out;
@@ -162,6 +198,22 @@ function dispatcherNotices(world: World): Notice[] {
       if (update.flag) out.push({ id: `${id}:flag:${update.at}`, at: update.at, title: `Flag · ${update.flag}`, body: `${dispatch.tech} · ${info.place}`, tone: "danger" });
       else out.push({ id: `${id}:stage${update.stage}:${update.at}`, at: update.at, title, body: `${id} · ${info.place}${update.note && repeat ? ` · ${update.note}` : ""}`, tone: isResolved(update.stage) ? "success" : update.stage === STAGE.awaitingParts || (repeat && update.ertDue) ? "warn" : "info" });
     });
+  }
+  out.push(...dispatcherCrewNotices(world));
+  return out;
+}
+
+function dispatcherCrewNotices(world: World): Notice[] {
+  const out: Notice[] = [];
+  for (const request of Object.values(world.crewRequests)) {
+    const place = describe(request.jobId, world)?.place ?? "Outage location";
+    out.push({ id: `${request.id}:requested`, at: request.at, title: `Additional crew requested · ${request.jobId}`, body: `${request.by} needs ${request.needed} more · ${request.reason} · ${place}`, tone: "warn" });
+    for (const helper of helpersOf(request)) out.push({ id: `${request.id}:${helper.name}:joined`, at: helper.at, title: `${firstName(helper.name)} is joining ${firstName(request.by)}`, body: `${request.jobId} · ${place}`, tone: "info" });
+    const declined = declinedBy(request).length;
+    if (declined > 0 && helpersOf(request).length === 0 && !request.closedAt) {
+      const last = Math.max(...declinedBy(request).map((name) => request.responses[name]!.at));
+      out.push({ id: `${request.id}:declined:${declined}`, at: last, title: `No crew has accepted yet · ${request.jobId}`, body: `${declined} technician${declined === 1 ? "" : "s"} declined. You may need to send someone.`, tone: "danger" });
+    }
   }
   return out;
 }

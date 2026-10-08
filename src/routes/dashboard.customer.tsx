@@ -1,10 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
-import { Bell, BellOff, Camera, Check, CheckCircle2, Clock3, FileText, Film, House, Image as ImageIcon, LocateFixed, Megaphone, Pencil, TriangleAlert, Users, X, Zap } from "lucide-react";
+import { Bell, BellOff, Camera, Check, CheckCircle2, Clock3, FileText, Film, House, Image as ImageIcon, LocateFixed, Megaphone, Pencil, Radio, TriangleAlert, Users, X, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { DashboardShell, Field, PageHeading, Stat } from "@/components/lesedi/shell";
 import { LiveMap } from "@/components/lesedi/live-map";
 import { IncidentTracker } from "@/components/lesedi/incident-tracker";
@@ -14,11 +13,11 @@ import { ResidentVisitCards } from "@/components/lesedi/visit-pin";
 import { currentUser, type MockUser } from "@/lib/auth";
 import { detectPosition, distanceKm, reverseGeocode } from "@/lib/geo";
 import { MAX_PHOTOS, MAX_VIDEO_MB, compressPhoto } from "@/lib/media";
-import { findDuplicate, type DuplicateMatch } from "@/lib/dedup";
+import { REPORT_RADIUS_KM, findDuplicate, nearbyTicket, type DuplicateMatch } from "@/lib/dedup";
 import { areas, ticketStore } from "@/lib/nodes";
 import { HOME_AREA_KM, NEARBY_KM, follow, followStore, isFollowing, nearbyIncidents, progressSteps, publicHistory, publicIncidents, unfollow } from "@/lib/incidents";
 import { formatDuration, nearestArea } from "@/lib/metrics";
-import { HOME_OUTAGE, addReport, ago, dispatchStore, isHomeOutage, isResolved, nextReportId, profileStore, reportStore, setReportVideo, type OutageReport, type OutageType } from "@/lib/reports";
+import { HOME_OUTAGE, OTHER_COMPLAINT, OTHER_NOTE_MAX, addReport, ago, complaintsByType, dispatchStore, isHomeOutage, isResolved, nextReportId, profileStore, reportStore, setReportVideo, type OutageReport, type OutageType } from "@/lib/reports";
 
 export const Route = createFileRoute("/dashboard/customer")({
   head: () => ({
@@ -34,7 +33,7 @@ export const Route = createFileRoute("/dashboard/customer")({
   component: CustomerDashboard,
 });
 
-type DetailErrors = { [K in "type" | "phone" | "account"]?: string | undefined };
+type DetailErrors = { [K in "type" | "complaint" | "note" | "phone" | "account"]?: string | undefined };
 
 const SA_PHONE = /^(\+27|0)[0-9]{9}$/;
 const cleanPhone = (value: string) => value.replace(/[\s()-]/g, "");
@@ -42,9 +41,11 @@ const cleanPhone = (value: string) => value.replace(/[\s()-]/g, "");
 const METER_OR_ACCOUNT = /^[A-Za-z0-9-]{5,20}$/;
 
 /** Name, email and cell number are already on the account, so the only things left to check are these. */
-function validate(phone: string, type: OutageType | null, account: string): DetailErrors {
+function validate(phone: string, type: OutageType | null, complaint: string, note: string, account: string): DetailErrors {
   const errors: DetailErrors = {};
   if (!type) errors.type = "Choose what is happening.";
+  else if (!complaint) errors.complaint = "Choose what best describes the problem.";
+  else if (complaint === OTHER_COMPLAINT && !note.trim()) errors.note = "Say briefly what is wrong.";
   if (!SA_PHONE.test(cleanPhone(phone))) errors.phone = "Enter a valid South African number, e.g. 082 000 0000 or +27 82 000 0000.";
   if (type === HOME_OUTAGE && account.trim() && !METER_OR_ACCOUNT.test(account.replace(/\s/g, ""))) errors.account = "That number does not look right. Use the digits on your prepaid meter or municipal bill, or leave it blank.";
   return errors;
@@ -80,6 +81,8 @@ function CustomerDashboard() {
   const phone = phoneEdit ?? (saved?.phone || me?.phone) ?? "";
   const account = accountEdit ?? saved?.account ?? "";
   const [outageType, setOutageType] = useState<OutageType | null>(null);
+  const [complaint, setComplaint] = useState("");
+  /** The short note, only for "Something else". */
   const [description, setDescription] = useState("");
   const [landmark, setLandmark] = useState("");
   const [errors, setErrors] = useState<DetailErrors>({});
@@ -170,7 +173,7 @@ function CustomerDashboard() {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const found = validate(phone, outageType, account);
+    const found = validate(phone, outageType, complaint, description, account);
     setErrors(found);
     if (found.phone) setEditingPhone(true);
     if (!pin) {
@@ -181,9 +184,9 @@ function CustomerDashboard() {
       requestAnimationFrame(() => (document.querySelector('#report-form [role="alert"]') as HTMLElement | null)?.scrollIntoView({ block: "center", behavior: "smooth" }));
       return;
     }
-    // Deduplication: link this report to an open incident that already covers the spot, instead of opening a new one.
+    // Deduplication: the same complaint within 1 km of an open report joins that incident instead of opening a new one.
     // A home outage is never merged: it is a fault at one property, not a shared one.
-    const duplicate = findDuplicate(pin, reports, tickets, dispatches, outageType);
+    const duplicate = findDuplicate(pin, reports, tickets, dispatches, outageType, complaint);
     const meter = outageType === HOME_OUTAGE ? account.replace(/\s/g, "") : "";
     const report: OutageReport = {
       id: nextReportId(),
@@ -197,7 +200,8 @@ function CustomerDashboard() {
       ...(meter ? { account: meter } : {}),
       contact: phone.trim(),
       type: outageType,
-      description: description.trim(),
+      complaint,
+      description: complaint === OTHER_COMPLAINT ? description.trim().slice(0, OTHER_NOTE_MAX) : "",
       lat: pin.lat,
       lng: pin.lng,
       accuracy,
@@ -217,6 +221,7 @@ function CustomerDashboard() {
     setDescription("");
     setLandmark("");
     setOutageType(null);
+    setComplaint("");
     setEditingPhone(false);
     setErrors({});
   }
@@ -254,10 +259,11 @@ function CustomerDashboard() {
   const nearby = areaPoint ? nearbyIncidents(publicList, areaPoint) : [];
 
   // Duplicate check first: as soon as we know where the resident is, say if that fault is already reported.
-  const match = useMemo(() => (pin ? findDuplicate(pin, reports, tickets, dispatches, outageType) : null), [pin, outageType, reports, tickets, dispatches]);
+  const match = useMemo(() => (pin ? findDuplicate(pin, reports, tickets, dispatches, outageType, complaint) : null), [pin, outageType, complaint, reports, tickets, dispatches]);
   const matchIncident = match ? publicList.find((incident) => incident.id === match.id) : undefined;
   const ownMatch = match ? mine.some((report) => report.id === match.id || report.duplicateOf === match.id) : false;
   const followingMatch = match ? isFollowing(match.id, resident, follows) : false;
+  const related = useMemo(() => (pin ? nearbyTicket(pin, tickets) : undefined), [pin, tickets]);
 
   async function checkArea() {
     setAreaChecking(true);
@@ -365,13 +371,13 @@ function CustomerDashboard() {
             <h2 className="mt-4 text-2xl font-extrabold text-navy">{submitted.duplicate ? "Report linked to an existing incident" : "Report received"}</h2>
             <p className="mt-1 text-muted-foreground">Reference {submitted.report.id}{submitted.duplicate ? ` · ${submitted.duplicate.label}` : " · We're checking for nearby incidents."}</p>
             <p className="mx-auto mt-2 max-w-md text-xs text-muted-foreground">{submitted.duplicate ? "Someone nearby already reported this, so we merged your report into the same incident. Your photos and details were added, and you will see the same live progress and technician tracking. " : ""}Location saved · {submitted.report.photos.length} photo{submitted.report.photos.length === 1 ? "" : "s"}{submitted.report.hasVideo ? " · 1 video" : ""} sent to the control centre</p>
-            {isHomeOutage(submitted.report) && <p className="mx-auto mt-3 max-w-md rounded-md bg-secondary p-3 text-xs">When the technician arrives at your property, a <strong>Visit PIN</strong> will appear at the top of this page. Read it out at your gate so they can start work.</p>}
+            {isHomeOutage(submitted.report) && <p className="mx-auto mt-3 max-w-md rounded-md bg-secondary p-3 text-xs">When the technician arrives, ask them for their <strong>Visit code</strong> and enter it at the top of this page. It confirms they are the technician the city sent, before you let them in.</p>}
             <Button className="mt-5" onClick={() => { setSubmitted(null); autoLocate(); }}>Submit another report</Button>
           </section>
         ) : (
           <form id="report-form" onSubmit={submit} noValidate className="scroll-mt-20 rounded-md border border-border bg-card p-5 sm:p-6">
             <h2 className="font-extrabold text-navy">Report an outage</h2>
-            <p className="mt-1 text-xs text-muted-foreground">We use the name and cell number on your account, so there is nothing to type. Pick what is wrong and send.</p>
+            <p className="mt-1 text-xs text-muted-foreground">We use the name and cell number on your account, so there is nothing to type. Pick what is wrong from the lists and send.</p>
 
             <section className="mt-5" aria-labelledby="where-title">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-secondary p-3">
@@ -397,28 +403,12 @@ function CustomerDashboard() {
               )}
             </section>
 
-            {match && (
-              <div className="mt-4 rounded-md border-2 border-primary bg-card p-4" role="status" aria-live="polite">
-                <p className="flex items-center gap-2 text-sm font-extrabold text-navy"><Users className="size-4 text-primary" /> {ownMatch ? "You already reported this fault" : "This outage is already reported"}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {matchIncident ? `${matchIncident.area} · ${matchIncident.status} · ${matchIncident.reports + matchIncident.followers} affected.` : `${match.label}.`}{" "}
-                  {ownMatch ? "Follow its progress at the top of this page." : followingMatch ? "You are following it. Its live progress is at the top of this page, so there is nothing more to do." : "Follow it to see live progress and the technician on the way. No report needed."}
-                </p>
-                {!ownMatch && (
-                  <div className="mt-3 flex flex-wrap items-center gap-3">
-                    <Button type="button" className="min-h-11" variant={followingMatch ? "outline" : "default"} onClick={() => (followingMatch ? unfollow(match.id, resident) : follow(match.id, resident))}>{followingMatch ? <><BellOff /> Stop following</> : <><Bell /> Follow this outage</>}</Button>
-                    <p className="min-w-0 flex-1 text-xs text-muted-foreground">Only your own home? Choose “Just my home” below to report it separately. Sending a report here adds yours to this outage.</p>
-                  </div>
-                )}
-              </div>
-            )}
-
             <fieldset className="mt-6">
               <legend className="text-sm font-extrabold text-navy">What is happening?</legend>
               <div className="mt-3 grid gap-3 md:grid-cols-3">
                 {typeChoices.map(({ type, title, text, icon: Icon }) => (
                   <label key={type} className="flex min-h-14 cursor-pointer items-start gap-3 rounded-md border border-border p-4 has-[:checked]:border-primary has-[:checked]:bg-secondary has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
-                    <input type="radio" name="outage-type" value={type} className="sr-only" checked={outageType === type} onChange={() => { setOutageType(type); setErrors((current) => ({ ...current, type: undefined })); }} />
+                    <input type="radio" name="outage-type" value={type} className="sr-only" checked={outageType === type} onChange={() => { setOutageType(type); setComplaint(""); setDescription(""); setErrors((current) => ({ ...current, type: undefined, complaint: undefined, note: undefined })); }} />
                     <Icon className="mt-0.5 size-6 shrink-0 text-primary" aria-hidden="true" />
                     <span className="min-w-0">
                       <span className="block font-extrabold text-navy">{title}</span>
@@ -429,6 +419,55 @@ function CustomerDashboard() {
               </div>
               {errors.type && <p role="alert" className="mt-2 text-xs font-bold text-destructive">{errors.type}</p>}
             </fieldset>
+
+            {outageType && (
+              <div className="mt-5 max-w-md space-y-3">
+                <Field id="complaint" label="What exactly is wrong?" error={errors.complaint}>
+                  <select id="complaint" value={complaint} aria-invalid={Boolean(errors.complaint)} onChange={(event) => { setComplaint(event.target.value); setDescription(""); setErrors((current) => ({ ...current, complaint: undefined, note: undefined })); }} className="h-11 w-full rounded-md border border-input bg-card px-3 text-sm">
+                    <option value="" disabled>Choose one…</option>
+                    {complaintsByType[outageType].map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </Field>
+                {complaint === OTHER_COMPLAINT && (
+                  <Field id="other-note" label="Say briefly what is wrong" hint={`${description.length}/${OTHER_NOTE_MAX} characters`} error={errors.note}>
+                    <Input id="other-note" maxLength={OTHER_NOTE_MAX} autoComplete="off" aria-invalid={Boolean(errors.note)} value={description} onChange={(event) => { setDescription(event.target.value); setErrors((current) => ({ ...current, note: undefined })); }} className="h-11" />
+                  </Field>
+                )}
+              </div>
+            )}
+
+            {match && (
+              <div className="mt-5 rounded-md border-2 border-primary bg-card p-4" role="status" aria-live="polite">
+                <p className="flex items-center gap-2 text-sm font-extrabold text-navy"><Users className="size-4 text-primary" /> {ownMatch ? "You already reported this fault" : match.kind === "report" ? "This problem is already reported nearby" : "This outage is already reported"}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {match.kind === "report" ? `Someone within ${REPORT_RADIUS_KM} km already reported “${match.complaint ?? complaint}”${match.complaint && match.complaint !== complaint ? ", which is the same fault" : ""}. ` : ""}{matchIncident ? `${matchIncident.area} · ${matchIncident.status} · ${matchIncident.reports + matchIncident.followers} affected.` : `${match.label}.`}{" "}
+                  {ownMatch ? "Follow its progress at the top of this page." : followingMatch ? "You are following it. Its live progress is at the top of this page, so there is nothing more to do." : "Follow it to see live progress and the technician on the way. No report needed."}
+                </p>
+                {!ownMatch && (
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <Button type="button" className="min-h-11" variant={followingMatch ? "outline" : "default"} onClick={() => (followingMatch ? unfollow(match.id, resident) : follow(match.id, resident))}>{followingMatch ? <><BellOff /> Stop following</> : <><Bell /> Follow this outage</>}</Button>
+                    <p className="min-w-0 flex-1 text-xs text-muted-foreground">Only your own home? Choose “Just my home” above to report it separately. Sending a report here adds yours to this outage.</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Not a duplicate, but the sensors already know the power is off here. Say so, so the resident can decide. */}
+            {!match && related && (outageType === HOME_OUTAGE || outageType === "Damaged equipment or hazard") && (
+              <div className="mt-5 rounded-md border border-primary bg-secondary p-4" role="status" aria-live="polite">
+                <p className="flex items-center gap-2 text-sm font-extrabold text-navy"><Radio className="size-4 text-primary" /> Our sensors show the power is off in {related.areaName}</p>
+                {outageType === HOME_OUTAGE ? (
+                  <>
+                    <p className="mt-1 text-xs text-muted-foreground">Your home is most likely part of that outage, and a crew is already being arranged. Follow it to get live updates. Only send this report if your neighbours still have power.</p>
+                    {isFollowing(related.id, resident, follows)
+                      ? <p className="mt-3 text-xs font-bold text-primary">You are following it. Its live progress is at the top of this page.</p>
+                      : <Button type="button" className="mt-3 min-h-11" onClick={() => follow(related.id, resident)}><Bell /> Follow the {related.areaName} outage</Button>}
+                  </>
+                ) : (
+                  <p className="mt-1 text-xs text-muted-foreground">Please still send this report. The crew needs to know about the damage, and it may be what caused the outage. We link the two for the control centre.</p>
+                )}
+              </div>
+            )}
 
             {outageType === HOME_OUTAGE && (
               <div className="mt-5 max-w-md">
@@ -452,10 +491,9 @@ function CustomerDashboard() {
             </div>
 
             <details className="mt-5 rounded-md border border-border p-4">
-              <summary className="min-h-8 cursor-pointer text-sm font-extrabold text-navy">Add a note, landmark or photo <span className="font-normal text-muted-foreground">(optional)</span></summary>
+              <summary className="min-h-8 cursor-pointer text-sm font-extrabold text-navy">Add a landmark or photo <span className="font-normal text-muted-foreground">(optional)</span></summary>
               <div className="mt-4 space-y-5">
-                <Field id="description" label="What can you see?"><Textarea id="description" value={description} onChange={(event) => setDescription(event.target.value)} className="min-h-24" placeholder="Describe the issue and any visible hazards" /></Field>
-                <Field id="landmark" label="Landmark or house number" hint="Helps the crew find the exact spot, e.g. the blue gate next to the spaza shop."><Input id="landmark" autoComplete="off" value={landmark} onChange={(event) => setLandmark(event.target.value)} className="h-11" /></Field>
+                <Field id="landmark" label="Landmark or house number" hint="Helps the crew find the exact spot, e.g. the blue gate next to the spaza shop."><Input id="landmark" autoComplete="off" maxLength={60} value={landmark} onChange={(event) => setLandmark(event.target.value)} className="h-11" /></Field>
                 <div>
                   <p className="text-sm font-medium leading-none">Photo or video</p>
                   <p className="mt-2 text-xs text-muted-foreground">Help the crew see the fault. Keep a safe distance from any damaged equipment.</p>

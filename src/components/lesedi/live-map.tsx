@@ -1,6 +1,9 @@
 import "leaflet/dist/leaflet.css";
 import { useEffect, useRef, useState } from "react";
 import type { Circle, LayerGroup, Map as LeafletMap, Marker, Polyline } from "leaflet";
+import { Maximize2 } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
 
 import type { Incident, Priority } from "@/components/lesedi/data";
 import type { CrewLocation } from "@/lib/reports";
@@ -34,9 +37,10 @@ type LiveMapProps = {
   area?: { lat: number; lng: number; radiusM: number } | null;
   /**
    * Change this to re-frame the map so everything on it is in view. The map otherwise frames itself only
-   * once, which would leave a technician who starts far away off-screen.
+   * once, which would leave a technician who starts far away off-screen. While it is set, the map also
+   * re-frames when a marker drifts out of view, until the user pans or zooms it themselves.
    */
-  fitKey?: string;
+  fitKey?: string | undefined;
   /** Picker mode: a draggable pin the user can place by tapping the map. */
   pin?: { lat: number; lng: number } | null;
   pinAccuracy?: number | undefined;
@@ -93,6 +97,11 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
   const pinFromMap = useRef(false);
   const fitted = useRef(false);
   const lastFitKey = useRef<string | undefined>(undefined);
+  /** The user moved the map by hand, so it stops re-framing itself until they ask, or the subject changes. */
+  const userMoved = useRef(false);
+  /** Moves the map makes on its own start before this time, so they are not mistaken for the user's. */
+  const autoMoveUntil = useRef(0);
+  const [detached, setDetached] = useState(false);
   const onSelectRef = useRef(onSelect);
   const onPinRef = useRef(onPin);
   const [ready, setReady] = useState(false);
@@ -110,6 +119,14 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
       const instance = L.map(container.current, { center: TSHWANE, zoom: 11, scrollWheelZoom: true });
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }).addTo(instance);
       layer.current = L.layerGroup().addTo(instance);
+      const detach = () => {
+        userMoved.current = true;
+        setDetached(true);
+      };
+      instance.on("dragstart", detach);
+      instance.on("zoomstart", () => {
+        if (Date.now() > autoMoveUntil.current) detach();
+      });
       instance.on("click", (event) => {
         if (!onPinRef.current) return;
         pinFromMap.current = true;
@@ -135,6 +152,10 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
     };
   }, []);
 
+  const autoMove = () => {
+    autoMoveUntil.current = Date.now() + 1500;
+  };
+
   /** Frame everything the map is drawing: markers, the route line and the affected-area circle. */
   const frameAll = () => {
     const L = lib.current;
@@ -148,8 +169,15 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
     if (area) bounds.extend(L.latLng(area.lat, area.lng).toBounds(area.radiusM * 2));
     if (!bounds.isValid()) return;
     fitted.current = true;
+    autoMove();
     map.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
   };
+
+  function showEverything() {
+    userMoved.current = false;
+    setDetached(false);
+    frameAll();
+  }
 
   // Draw incident, crew and GPS markers.
   useEffect(() => {
@@ -163,13 +191,15 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
     }
     if (!fitted.current && !pin && markers.length > 0) {
       fitted.current = true;
+      autoMove();
       map.current.fitBounds(L.latLngBounds(markers.map((item) => [item.lat, item.lng] as [number, number])), { padding: [40, 40], maxZoom: 13 });
       return;
     }
     // A marker can move a long way after the map framed itself: a technician's first real GPS reading
     // replaces their depot position, and then they drive. Re-frame only when one leaves the view, so the
-    // map does not jump about while they are on screen.
-    if (fitKey !== undefined && fitted.current && markers.length > 1 && !pin) {
+    // map does not jump about while they are on screen, and never once the user has moved the map: someone
+    // zoomed in to read a street name must not be pulled back out every time a crew moves.
+    if (fitKey !== undefined && fitted.current && markers.length > 1 && !pin && !userMoved.current) {
       const view = map.current.getBounds();
       if (markers.some((item) => !view.contains([item.lat, item.lng]))) frameAll();
     }
@@ -183,6 +213,7 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
     areaCircle.current = area ? L.circle([area.lat, area.lng], { radius: area.radiusM, className: "ll-area", weight: 2, fillOpacity: 0.15 }).addTo(map.current) : null;
     if (area && !fitted.current) {
       fitted.current = true;
+      autoMove();
       map.current.fitBounds(areaCircle.current!.getBounds(), { padding: [30, 30] });
     }
   }, [ready, area?.lat, area?.lng, area?.radiusM]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -192,6 +223,9 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
   useEffect(() => {
     if (!ready || fitKey === undefined || fitKey === lastFitKey.current) return;
     lastFitKey.current = fitKey;
+    // Something new to look at, such as a new job: follow it again even if the user had moved the map.
+    userMoved.current = false;
+    setDetached(false);
     frameAll();
   }, [ready, fitKey, markers, route, area]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -204,7 +238,9 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
   }, [ready, route]);
 
   useEffect(() => {
-    if (ready && focus && map.current) map.current.flyTo([focus.lat, focus.lng], Math.max(map.current.getZoom(), 14), { duration: 0.8 });
+    if (!ready || !focus || !map.current) return;
+    autoMove();
+    map.current.flyTo([focus.lat, focus.lng], Math.max(map.current.getZoom(), 14), { duration: 0.8 });
   }, [ready, focus?.lat, focus?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Picker pin: draggable, with an accuracy circle when the position came from GPS.
@@ -233,7 +269,10 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
     pinCircle.current?.remove();
     pinCircle.current = pinAccuracy ? L.circle(at, { radius: pinAccuracy, weight: 1, opacity: 0.6, fillOpacity: 0.12 }).addTo(map.current) : null;
     if (pinFromMap.current) pinFromMap.current = false;
-    else map.current.setView(at, Math.max(map.current.getZoom(), 16));
+    else {
+      autoMove();
+      map.current.setView(at, Math.max(map.current.getZoom(), 16));
+    }
   }, [ready, pin?.lat, pin?.lng, pinAccuracy]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
@@ -249,7 +288,12 @@ export function LiveMap({ title = "LIVE NETWORK MAP", subtitle = "Tshwane metro"
           <span><i className="mr-1 inline-block size-2 rounded-full bg-primary" />You</span>
         </p>
       </div>
-      <div ref={container} className={`isolate w-full bg-muted ${heightClass}`} role="application" aria-label={`${title}. Interactive OpenStreetMap.`} />
+      <div className="relative">
+        <div ref={container} className={`isolate w-full bg-muted ${heightClass}`} role="application" aria-label={`${title}. Interactive OpenStreetMap.`} />
+        {detached && fitKey !== undefined && (
+          <Button type="button" size="sm" variant="secondary" className="absolute bottom-3 left-3 z-10 min-h-9 shadow-md" onClick={showEverything}><Maximize2 /> Show everything</Button>
+        )}
+      </div>
     </div>
   );
 }

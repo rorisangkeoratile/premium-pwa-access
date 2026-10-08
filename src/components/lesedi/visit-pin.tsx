@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { CircleCheck, CircleX, KeyRound, MapPin } from "lucide-react";
+import { CircleCheck, CircleX, KeyRound, MapPin, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,21 +35,21 @@ function useNow(intervalMs = 1000) {
 }
 
 /**
- * What a resident sees for their own home outage: the Visit PIN when the technician arrives, and the
- * "is your power back?" question when the technician says the repair is done.
+ * What a resident sees for their own home outage: a box to enter the technician's Visit code when they arrive,
+ * and the "is your power back?" question when the technician says the repair is done.
  */
 export function ResidentVisitCards({ report, dispatch }: { report: OutageReport; dispatch: Dispatch }) {
   const now = useNow();
   const stage = dispatch.stage ?? -1;
   const first = dispatch.tech.split(" ")[0] ?? "Your technician";
   const state = pinState(dispatch.pin, now);
-  const showPin = stage <= 1 && Boolean(dispatch.arrival) && dispatch.pin !== undefined && state !== "used" && state !== "none";
+  const showCode = stage <= 1 && Boolean(dispatch.arrival) && dispatch.pin !== undefined && state !== "used" && state !== "none";
   const asking = stage === STAGE.testing && dispatch.completion !== undefined && !dispatch.completion.answer;
-  if (!showPin && !asking) return null;
+  if (!showCode && !asking) return null;
 
   return (
     <div className="mt-5 space-y-5">
-      {showPin && dispatch.pin && <PinCard report={report} pin={dispatch.pin} state={state} tech={dispatch.tech} first={first} now={now} />}
+      {showCode && dispatch.pin && <CodeEntryCard report={report} pin={dispatch.pin} state={state} tech={dispatch.tech} first={first} now={now} />}
       {asking && (
         <section className="rounded-md border-2 border-accent bg-card p-5" aria-labelledby={`confirm-${report.id}`} aria-live="polite">
           <p className="flex items-center gap-2 text-[10px] font-extrabold uppercase text-primary"><CircleCheck className="size-4" /> Please confirm · {report.id}</p>
@@ -65,23 +65,47 @@ export function ResidentVisitCards({ report, dispatch }: { report: OutageReport;
   );
 }
 
-function PinCard({ report, pin, state, tech, first, now }: { report: OutageReport; pin: VisitPin; state: ReturnType<typeof pinState>; tech: string; first: string; now: number }) {
+function CodeEntryCard({ report, pin, state, tech, first, now }: { report: OutageReport; pin: VisitPin; state: ReturnType<typeof pinState>; tech: string; first: string; now: number }) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
   const minutes = Math.max(1, Math.ceil((pin.expiresAt - now) / 60000));
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (code.length !== VISIT_PIN_LENGTH) {
+      setError(`Enter all ${VISIT_PIN_LENGTH} digits.`);
+      return;
+    }
+    const result = verifyVisitPin(report.id, code);
+    setCode("");
+    setError(result.status === "wrong" ? `That code does not match. ${result.attemptsLeft} ${result.attemptsLeft === 1 ? "try" : "tries"} left. Do not let them in until it matches.` : "");
+  }
+
   return (
     <section className="rounded-md border-2 border-primary bg-card p-5" aria-labelledby={`pin-${report.id}`} aria-live="polite">
-      <p className="flex items-center gap-2 text-[10px] font-extrabold uppercase text-primary"><KeyRound className="size-4" /> Visit PIN · {report.id}</p>
-      <h2 id={`pin-${report.id}`} className="mt-2 text-lg font-extrabold text-navy">{tech} has arrived at your property</h2>
+      <p className="flex items-center gap-2 text-[10px] font-extrabold uppercase text-primary"><ShieldCheck className="size-4" /> Check your technician · {report.id}</p>
+      <h2 id={`pin-${report.id}`} className="mt-2 text-lg font-extrabold text-navy">{tech} says they are at your property</h2>
       {state === "active" ? (
-        <>
-          <p className="mt-1 text-sm text-muted-foreground">Read this PIN out at your gate so they can start work. Only give it to a technician who shows you their LesediLink ID. Never share it by phone or message, or with anyone else.</p>
-          <p className="mt-4 rounded-md bg-secondary py-4 text-center text-4xl font-extrabold tabular-nums tracking-[0.25em] text-navy">
-            <span className="sr-only">{pin.code.split("").join(" ")}</span>
-            <span aria-hidden="true">{formatPin(pin.code)}</span>
-          </p>
-          <p className="mt-2 text-xs text-muted-foreground">Works for {minutes} more minute{minutes === 1 ? "" : "s"}. Three wrong tries lock it.</p>
-        </>
+        <form onSubmit={submit} className="mt-1" noValidate>
+          <p className="text-sm text-muted-foreground">Before you open the gate, ask {first} for the 6-digit Visit code in their LesediLink app and enter it here. If it matches, they are the technician the city sent you.</p>
+          <label htmlFor={`visit-code-${report.id}`} className="mt-4 block text-sm font-bold">Visit code from {first}</label>
+          <Input
+            id={`visit-code-${report.id}`}
+            value={code}
+            onChange={(event) => { setCode(event.target.value.replace(/\D/g, "").slice(0, VISIT_PIN_LENGTH)); setError(""); }}
+            inputMode="numeric"
+            pattern="[0-9]*"
+            autoComplete="one-time-code"
+            aria-invalid={Boolean(error)}
+            placeholder="••••••"
+            className="mt-2 h-14 bg-card text-center text-2xl font-extrabold tabular-nums tracking-[0.4em]"
+          />
+          {error && <p role="alert" className="mt-2 text-sm font-bold text-destructive">{error}</p>}
+          <Button type="submit" size="lg" className="mt-3 min-h-12 w-full"><ShieldCheck /> Check the code</Button>
+          <p className="mt-2 text-xs text-muted-foreground">{VISIT_PIN_MAX_ATTEMPTS - pin.attempts} tries left · works for {minutes} more minute{minutes === 1 ? "" : "s"}. If they cannot show you a code, do not let them in and call the city.</p>
+        </form>
       ) : (
-        <p className="mt-2 rounded-md bg-warning-soft p-3 text-sm">This PIN {state === "locked" ? "was locked after three wrong tries" : "has expired"}. Ask {first} to send you a new one.</p>
+        <p className="mt-2 rounded-md bg-warning-soft p-3 text-sm">This code {state === "locked" ? "was locked after three wrong tries" : "has expired"}. Ask {first} to make a new one in their app, then enter it here.</p>
       )}
     </section>
   );
@@ -90,7 +114,7 @@ function PinCard({ report, pin, state, tech, first, now }: { report: OutageRepor
 type PanelProps = {
   jobId: string;
   dispatch: Dispatch;
-  /** A home outage: the resident takes part with a PIN on arrival and a confirmation at the end. */
+  /** A home outage: the resident checks the technician with a Visit code on arrival and confirms at the end. */
   household: boolean;
   residentFirst: string | undefined;
   target: { lat: number; lng: number };
@@ -102,7 +126,7 @@ type PanelProps = {
   onNotesUsed: () => void;
 };
 
-/** The technician's side of arrival (GPS check, then the resident's PIN for a home outage) and of waiting for the resident's confirmation. */
+/** The technician's side of arrival (GPS check, then the Visit code the resident checks for a home outage) and of waiting for the resident's confirmation. */
 export function TechnicianVisitPanel(props: PanelProps) {
   const stage = props.dispatch.stage ?? -1;
   if (stage === 1) return <ArrivalStep {...props} />;
@@ -132,10 +156,10 @@ function ArrivalStep({ jobId, dispatch, household, residentFirst, target, radius
     <div className="mt-5 rounded-md border border-border bg-secondary p-4">
       <p className="flex items-center gap-2 text-sm font-extrabold text-navy"><MapPin className="size-4 text-primary" /> Arrival</p>
       {dispatch.arrival && household ? (
-        <PinEntry jobId={jobId} pin={dispatch.pin} distanceM={dispatch.arrival.distanceM} residentFirst={residentFirst} notes={notes} onNotesUsed={onNotesUsed} />
+        <CodeShow jobId={jobId} pin={dispatch.pin} distanceM={dispatch.arrival.distanceM} residentFirst={residentFirst} notes={notes} onNotesUsed={onNotesUsed} />
       ) : (
         <>
-          <p className="mt-1 text-xs text-muted-foreground">Tap when you reach {place}. Your phone's GPS must place you within {formatDistance(radiusM)} of {household ? "the reported location" : "its centre"}.{household ? " The resident will then get a Visit PIN to read out to you." : ""}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Tap when you reach {place}. Your phone's GPS must place you within {formatDistance(radiusM)} of {household ? "the reported location" : "its centre"}.{household ? " Your app then shows a Visit code to give the resident, so they can check it is you." : ""}</p>
           <Button className="mt-3 min-h-12 w-full" onClick={arrive} disabled={checking}><MapPin /> {checking ? "Checking your position…" : "I've arrived"}</Button>
           {problem && <p role="alert" className="mt-3 text-sm font-bold text-destructive">{problem}</p>}
           {/* GPS can be missing or coarse (a laptop, a basement, a cloudy day), so it must never be the only way
@@ -155,61 +179,34 @@ function ArrivalStep({ jobId, dispatch, household, residentFirst, target, radius
   );
 }
 
-function PinEntry({ jobId, pin, distanceM, residentFirst, notes, onNotesUsed }: { jobId: string; pin: VisitPin | undefined; distanceM: number; residentFirst: string | undefined; notes: string; onNotesUsed: () => void }) {
+function CodeShow({ jobId, pin, distanceM, residentFirst, notes, onNotesUsed }: { jobId: string; pin: VisitPin | undefined; distanceM: number; residentFirst: string | undefined; notes: string; onNotesUsed: () => void }) {
   const now = useNow();
   const state = pinState(pin, now);
-  const [code, setCode] = useState("");
-  const [error, setError] = useState("");
   const who = residentFirst ?? "the resident";
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    if (code.length !== VISIT_PIN_LENGTH) {
-      setError(`Enter all ${VISIT_PIN_LENGTH} digits.`);
-      return;
-    }
-    const result = verifyVisitPin(jobId, code, notes.trim() || undefined);
-    if (result.status === "ok") {
-      onNotesUsed();
-      return;
-    }
-    setCode("");
-    setError(result.status === "wrong" ? `That PIN is not right. ${result.attemptsLeft} ${result.attemptsLeft === 1 ? "try" : "tries"} left.` : "");
-  }
-
   const minutes = pin ? Math.max(1, Math.ceil((pin.expiresAt - now) / 60000)) : 0;
-  const stateMessage = state === "locked" ? "This PIN is locked after three wrong tries." : state === "expired" ? "This PIN has expired." : "No PIN has been sent yet.";
+  const stateMessage = state === "locked" ? `${who} entered a wrong code three times, so it is locked.` : state === "expired" ? "This code has expired." : "No code has been made yet.";
 
   return (
     <div>
-      <p className="mt-1 text-xs text-muted-foreground">GPS confirms you are {formatDistance(distanceM)} from the reported location. {who} can now see a Visit PIN in their app.</p>
-      {state === "active" ? (
-        <form onSubmit={submit} className="mt-3" noValidate>
-          <label htmlFor="visit-pin" className="text-sm font-bold">Ask {who} for the Visit PIN</label>
-          <Input
-            id="visit-pin"
-            value={code}
-            onChange={(event) => { setCode(event.target.value.replace(/\D/g, "").slice(0, VISIT_PIN_LENGTH)); setError(""); }}
-            inputMode="numeric"
-            pattern="[0-9]*"
-            autoComplete="off"
-            aria-invalid={Boolean(error)}
-            placeholder="••••••"
-            className="mt-2 h-14 bg-card text-center text-2xl font-extrabold tabular-nums tracking-[0.4em]"
-          />
-          {error && <p role="alert" className="mt-2 text-sm font-bold text-destructive">{error}</p>}
-          <Button type="submit" className="mt-3 min-h-12 w-full"><KeyRound /> Confirm PIN and start</Button>
-          <p className="mt-2 text-[11px] text-muted-foreground">{VISIT_PIN_MAX_ATTEMPTS - (pin?.attempts ?? 0)} tries left · expires in {minutes} min</p>
-        </form>
+      <p className="mt-1 text-xs text-muted-foreground">{distanceM >= 0 ? `GPS confirms you are ${formatDistance(distanceM)} from the reported location. ` : ""}{who} has been told you are at the gate.</p>
+      {state === "active" && pin ? (
+        <div className="mt-3">
+          <p className="text-sm font-bold">Give {who} this Visit code</p>
+          <p className="mt-2 rounded-md bg-card py-4 text-center text-4xl font-extrabold tabular-nums tracking-[0.25em] text-navy">
+            <span className="sr-only">{pin.code.split("").join(" ")}</span>
+            <span aria-hidden="true">{formatPin(pin.code)}</span>
+          </p>
+          <p role="status" className="mt-2 text-xs text-muted-foreground">{who} enters it in their app to confirm you are the technician the city sent. The job moves to "On site" as soon as it matches. {VISIT_PIN_MAX_ATTEMPTS - pin.attempts} tries left · expires in {minutes} min.</p>
+        </div>
       ) : (
         <div className="mt-3">
           <p role="alert" className="text-sm font-bold text-destructive">{stateMessage}</p>
           {canSendAnotherPin(pin)
-            ? <Button className="mt-3 min-h-12 w-full" onClick={() => { issueVisitPin(jobId); setError(""); }}><KeyRound /> Send {who} a new PIN</Button>
-            : <p className="mt-2 text-xs text-muted-foreground">No more PINs can be sent for this job. Use the option below if {who} cannot take part.</p>}
+            ? <Button className="mt-3 min-h-12 w-full" onClick={() => issueVisitPin(jobId)}><KeyRound /> Make a new code for {who}</Button>
+            : <p className="mt-2 text-xs text-muted-foreground">No more codes can be made for this job. Use the option below if {who} cannot take part.</p>}
         </div>
       )}
-      <OverrideForm summary={`${who} can't give the PIN?`} action="Start without the PIN" onConfirm={(reason) => { startWithoutPin(jobId, reason, notes.trim() || undefined); onNotesUsed(); }} />
+      <OverrideForm summary={`${who} can't enter the code?`} action="Start without the code" onConfirm={(reason) => { startWithoutPin(jobId, reason, notes.trim() || undefined); onNotesUsed(); }} />
     </div>
   );
 }

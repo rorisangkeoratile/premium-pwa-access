@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Camera, Check, CheckCircle2, ClipboardList, Clock3, ExternalLink, HardHat, Hourglass, LocateFixed, MessageSquareText, Navigation, Package, Play, Square, TimerReset, Wrench, Zap } from "lucide-react";
+import { ArrowRight, Camera, Check, CheckCircle2, ClipboardList, Clock3, ExternalLink, HardHat, Hourglass, LocateFixed, MessageSquareText, Navigation, Package, Play, Square, TimerReset, UsersRound, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -12,6 +12,8 @@ import { LinkedReports } from "@/components/lesedi/job-progress";
 import { AutoTicketDetail } from "@/components/lesedi/node-network";
 import { technicians, type Incident, type MockUser } from "@/components/lesedi/data";
 import { TechnicianVisitPanel } from "@/components/lesedi/visit-pin";
+import { HelpRequestCard, RequestCrewPanel, SupportPanel } from "@/components/lesedi/crew-help";
+import { crewPosition, crewRequestStore, helpersOf, openRequestFor, pendingFor, supportingFor } from "@/lib/crew-requests";
 import { currentUser } from "@/lib/auth";
 import { detectPosition, useWatchPosition, type GeoFix } from "@/lib/geo";
 import { jobsFor, type Job } from "@/lib/metrics";
@@ -92,6 +94,7 @@ function TechnicianDashboard() {
   const dispatches = dispatchStore.use();
   const tickets = ticketStore.use();
   const crewLocations = crewStore.use();
+  const crewRequests = crewRequestStore.use();
   const lastShared = useRef(0);
 
   useEffect(() => {
@@ -119,9 +122,30 @@ function TechnicianDashboard() {
   const reportLate = reportDue !== undefined && now > reportDue;
   const neededParts = Boolean(activeDispatch?.updates?.some((update) => update.stage === STAGE.awaitingParts));
 
+  // Additional crew: requests waiting for my answer, a job I agreed to help on, and my own open request.
+  const pendingHelp = useMemo(() => (ME ? pendingFor(ME, crewRequests, dispatches) : []), [ME, crewRequests, dispatches]);
+  const support = useMemo(() => (ME ? supportingFor(ME, crewRequests, dispatches)[0] : undefined), [ME, crewRequests, dispatches]);
+  const myRequest = active ? openRequestFor(active.id, crewRequests, dispatches) : undefined;
+  const incidentById = (id: string): Incident | undefined => {
+    const ticket = tickets.find((item) => item.id === id);
+    if (ticket) return ticketToIncident(ticket);
+    const report = reports.find((item) => item.id === id);
+    return report ? toIncident(report, reports.filter((other) => other.duplicateOf === id).length) : undefined;
+  };
+  const supportIncident = support ? incidentById(support.jobId) : undefined;
+  const supportTicket = support ? tickets.find((item) => item.id === support.jobId) : undefined;
+
+  // The map and directions lead to my own job, or, with none, to the job I am helping on.
+  const destination = activeIncident ?? supportIncident;
+  const focusId = active?.id ?? (supportIncident ? support?.jobId : undefined);
+  const focusReport = focusId ? reports.find((item) => item.id === focusId) : undefined;
+  const focusTicket = focusId ? tickets.find((item) => item.id === focusId) : undefined;
+
   const shared = crewLocations[ME];
   const position = shared ?? (fix ? { lat: fix.lat, lng: fix.lng } : base ? { lat: base.lat, lng: base.lng } : TSHWANE);
-  const route = useRoute(activeIncident ? position : null, activeIncident ?? null);
+  const route = useRoute(destination ? position : null, destination ?? null);
+  // With a job of my own as well, the job I am helping on gets its own ETA.
+  const supportRoute = useRoute(active && supportIncident ? position : null, active && supportIncident ? supportIncident : null);
 
   // With no job the map shows every open outage, so a technician can see where the trouble is.
   const cityIncidents = useMemo(
@@ -132,10 +156,18 @@ function TechnicianDashboard() {
     [tickets, reports, dispatches],
   );
   const markers = useMemo<MapMarker[]>(() => {
-    const list: MapMarker[] = incidentMarkers(active ? openJobs.map(incidentOf) : cityIncidents);
+    const list: MapMarker[] = incidentMarkers(active ? openJobs.map(incidentOf) : supportIncident ? [supportIncident] : cityIncidents);
+    if (support && !active) {
+      const lead = crewPosition(support.by, crewLocations);
+      if (lead) list.push({ id: `crew:${support.by}`, ...lead, kind: "crew", label: support.by, detail: "Asked for your help" });
+    }
+    for (const helper of myRequest ? helpersOf(myRequest) : []) {
+      const at = crewPosition(helper.name, crewLocations);
+      if (at) list.push({ id: `crew:${helper.name}`, ...at, kind: "crew", label: helper.name, detail: helper.arrivedAt ? "On site to help you" : "Coming to help you" });
+    }
     list.push({ id: "me", lat: position.lat, lng: position.lng, kind: "me", label: "You are here", detail: simulating ? "Simulated drive (demo)" : usingSimulated ? "Simulated position (demo)" : fix ? `GPS accuracy ±${Math.round(fix.accuracy)} m` : "Last known position" });
     return list;
-  }, [position.lat, position.lng, openJobs, cityIncidents, fix, simulating, usingSimulated]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [position.lat, position.lng, openJobs, cityIncidents, fix, simulating, usingSimulated, support, supportIncident?.id, myRequest, crewLocations]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const distanceLabel = route ? `${route.distanceKm.toFixed(1)} km` : "…";
   const etaLabel = route ? `${route.minutes} min` : "…";
@@ -259,26 +291,37 @@ function TechnicianDashboard() {
 
   const heading = activeIncident
     ? { title: `Active job · ${activeIncident.id}`, text: `${activeIncident.place} · ${activeIncident.detail}` }
+    : support && supportIncident
+    ? { title: `Helping ${support.by.split(" ")[0]} · ${supportIncident.id}`, text: `${supportIncident.place} · ${support.reason}` }
     : { title: "Standing by", text: `On shift${base ? ` · ${base.depot}` : ""}. You are visible to the control centre, and a new job appears here the moment it is dispatched.` };
-  const googleMaps = activeIncident ? `https://www.google.com/maps/dir/?api=1&destination=${activeIncident.lat},${activeIncident.lng}` : "";
-  const waze = activeIncident ? `https://waze.com/ul?ll=${activeIncident.lat},${activeIncident.lng}&navigate=yes` : "";
+  const googleMaps = destination ? `https://www.google.com/maps/dir/?api=1&destination=${destination.lat},${destination.lng}` : "";
+  const waze = destination ? `https://waze.com/ul?ll=${destination.lat},${destination.lng}&navigate=yes` : "";
 
   return (
     <DashboardShell home="/dashboard/technician" user={me?.name ?? "Technician"} role={me?.title ?? "Field technician"}>
       <PageHeading eyebrow="Technician" title={heading.title} text={heading.text} action={<span className={`rounded-full px-3 py-2 text-xs font-extrabold ${simulating || usingSimulated ? "bg-warning-soft" : fix ? "bg-success-soft text-success" : "bg-warning-soft"}`}>{simulating ? "SIMULATED DRIVE" : usingSimulated ? "SIMULATED POSITION" : fix ? "GPS ACTIVE" : gpsError ? "GPS OFF" : "LOCATING…"}</span>} />
 
+      {pendingHelp.length > 0 && (
+        <div className="mb-5 space-y-3">
+          {pendingHelp.map((request) => {
+            const target = incidentById(request.jobId);
+            return target ? <HelpRequestCard key={request.id} request={request} me={ME} from={position} target={target} busyWith={active?.id} /> : null;
+          })}
+        </div>
+      )}
+
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Shift summary">
         <Stat label="Jobs today" value={`${openJobs.length} open`} note={`${doneToday.length} completed today`} icon={ClipboardList} />
-        <Stat label="Current ETA" value={active ? etaLabel : "—"} note={active ? (route ? `${distanceLabel} by road${route.source === "estimate" ? " (estimate)" : ""}` : "Finding route…") : "No job assigned"} icon={Navigation} />
+        <Stat label="Current ETA" value={destination ? etaLabel : "—"} note={destination ? (route ? `${distanceLabel} by road${route.source === "estimate" ? " (estimate)" : ""}` : "Finding route…") : "No job assigned"} icon={Navigation} />
         <Stat label="Next status report" value={reportDue !== undefined ? clockTime(reportDue) : "—"} note={reportDue !== undefined ? `${dueLabel(reportDue, now)}${ert !== undefined ? ` · ERT ${clockTime(ert)}` : ""}` : activeDispatch ? "Job resolved" : "Standing by"} icon={Clock3} alert={reportLate} />
         <Stat label="Safety checks" value={active ? `${checked.length} / 4` : "—"} note={active ? "Complete before energising" : "No job assigned"} icon={HardHat} alert={Boolean(active) && checked.length < 4} />
       </section>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_.7fr]">
         <section className="space-y-5">
-          <LiveMap markers={markers} route={route?.coords ?? null} heightClass="h-80" title={active ? "MY LIVE ROUTE MAP" : "OPEN OUTAGES"} subtitle={simulating ? "Simulated drive along the road route · the resident is watching this move" : usingSimulated ? "Using the simulated position · the resident sees you here" : fix ? "Your GPS position is shared with the control centre and customer" : gpsError ?? "Waiting for GPS…"} />
+          <LiveMap markers={markers} route={route?.coords ?? null} heightClass="h-80" title={active ? "MY LIVE ROUTE MAP" : support ? "ROUTE TO HELP A COLLEAGUE" : "OPEN OUTAGES"} fitKey={focusId} subtitle={simulating ? "Simulated drive along the road route · the resident is watching this move" : usingSimulated ? "Using the simulated position · the resident sees you here" : fix ? "Your GPS position is shared with the control centre and customer" : gpsError ?? "Waiting for GPS…"} />
 
-          {active && activeIncident && (
+          {destination && (
             <>
               <div className="rounded-md border border-border bg-card p-5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -310,15 +353,16 @@ function TechnicianDashboard() {
               <div className="rounded-md border border-border bg-card p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
-                    <PriorityBadge value={activeIncident.priority} />
-                    <h2 className="mt-3 text-xl font-extrabold text-navy">{activeIncident.place}</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">{activeIncident.detail}</p>
+                    <PriorityBadge value={destination.priority} />
+                    {!active && support && <p className="mt-3 flex items-center gap-2 text-[10px] font-extrabold uppercase text-primary"><UsersRound className="size-4" /> {support.by}'s job · you are helping</p>}
+                    <h2 className="mt-3 text-xl font-extrabold text-navy">{destination.place}</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">{destination.detail}</p>
                   </div>
                   <Navigation className="size-7 shrink-0 text-primary" />
                 </div>
-                {active.report && <div className="mt-4"><ReportEvidence report={active.report} /></div>}
-                {active.ticket && <div className="mt-4"><AutoTicketDetail ticket={active.ticket} /></div>}
-                <div className="mt-4"><LinkedReports reports={reports.filter((report) => report.duplicateOf === active.id)} /></div>
+                {focusReport && <div className="mt-4"><ReportEvidence report={focusReport} /></div>}
+                {focusTicket && <div className="mt-4"><AutoTicketDetail ticket={focusTicket} /></div>}
+                <div className="mt-4"><LinkedReports reports={reports.filter((report) => report.duplicateOf === focusId)} /></div>
               </div>
             </>
           )}
@@ -348,7 +392,8 @@ function TechnicianDashboard() {
           </div>
         </section>
 
-        {active && activeDispatch ? (
+        <div className="space-y-5">
+        {active && activeDispatch && activeIncident && (
           <section className="rounded-md border border-border bg-card p-5">
             <h2 className="font-extrabold text-navy">Update job progress</h2>
             <p className="mt-1 text-xs text-muted-foreground">The customer and control centre see each update instantly. Arrival is checked against your phone's GPS.{active.ticket ? " Resolving the job restores power in the simulation, and the sensors then confirm it." : ""}</p>
@@ -433,16 +478,19 @@ function TechnicianDashboard() {
                   <p className="mt-2 text-[11px] text-muted-foreground">The reason in your work notes goes to the control centre, and the resident is told the new time. Performance is still measured on the first ERT.</p>
                 </details>
               )}
-              <Button variant="ghost" className="mt-2 w-full"><Zap /> Request additional crew</Button>
+              {stage >= STAGE.accepted && stage < STAGE.resolved && <RequestCrewPanel jobId={active.id} me={ME} target={activeIncident} request={myRequest} crewLocations={crewLocations} now={now} />}
             </div>
           </section>
-        ) : (
+        )}
+        {support && supportIncident && <SupportPanel request={support} me={ME} target={supportIncident} route={active ? supportRoute : route} getPosition={currentPosition} radiusM={supportTicket ? AREA_ARRIVAL_RADIUS_M : ARRIVAL_RADIUS_M} />}
+        {!active && !support && (
           <section className="rounded-md border border-border bg-card p-5">
             <div className="flex items-center gap-3"><Hourglass className="size-6 text-primary" aria-hidden="true" /><h2 className="font-extrabold text-navy">Standing by</h2></div>
             <p className="mt-3 text-sm text-muted-foreground">No job is assigned to you. When the control centre dispatches one, it appears here straight away and you get a notification, even if this tab is in the background.</p>
             <p className="mt-3 rounded-md bg-secondary p-3 text-xs">Your position is shared with the control centre while this page is open, so the dispatcher can see you are online and how close you are to an outage.</p>
           </section>
         )}
+        </div>
       </div>
     </DashboardShell>
   );

@@ -3,21 +3,23 @@ import { DEFAULT_REPAIR_ERT } from "@/lib/ert";
 import { STAGE, dispatchStore, patchDispatch, updateJob, type Dispatch, type VisitPin } from "@/lib/reports";
 
 /*
- * Arrival and the Visit PIN.
+ * Arrival and the Visit code.
  *
  * Every job: "On site" is only reachable when the technician's phone GPS puts them at the reported
  * location, so a job cannot be marked as visited from the couch.
  *
  * Home outages (a fault at one property) add a handshake with the resident, in both directions:
- *  - Arrival: the technician taps "I've arrived", the resident's app shows a 6-digit Visit PIN, the
- *    resident reads it out at the gate and the technician types it in. That proves the resident let them in.
+ *  - Arrival: the technician taps "I've arrived" and their app shows a 6-digit Visit code. They give it to the
+ *    resident at the gate, and the resident types it into their own app. A match proves the person at the gate
+ *    is the technician the city sent, before the resident lets anyone in.
  *  - Completion: the technician says the repair is done and the resident taps "Yes, my power is back".
- *    A tap is used instead of a second PIN because it also proves the fault is fixed, and "No" reopens the job.
+ *    A tap is used instead of a second code because it also proves the fault is fixed, and "No" reopens the job.
  * If the resident cannot take part (nobody home, phone flat), the technician can carry on with a reason
  * and the step is flagged for the control centre.
  *
- * Prototype: the PIN lives in localStorage so the two demo tabs can both see it. In production it is
- * created and checked on the server, sent to the resident's app or SMS, and never reaches the technician's device.
+ * Prototype: the code lives in localStorage so the two demo tabs can both see it. In production it is
+ * created on the server, shown only on the assigned technician's signed-in device, and checked on the server
+ * when the resident enters it, so it never reaches the resident's device until they type it.
  */
 
 /**
@@ -56,7 +58,7 @@ export function arrivalProblem(check: Exclude<ArrivalCheck, { status: "ok" }>, r
 export const VISIT_PIN_LENGTH = 6;
 export const VISIT_PIN_TTL_MS = 30 * 60 * 1000;
 export const VISIT_PIN_MAX_ATTEMPTS = 3;
-/** A PIN can be sent again when it expires or locks, but only this many times per job. */
+/** A new code can be made when one expires or locks, but only this many times per job. */
 export const VISIT_PIN_MAX_ISSUES = 3;
 
 /** Why a technician may carry on without the resident. Each one is flagged for the control centre. */
@@ -85,7 +87,7 @@ export function pinState(pin: VisitPin | undefined, now = Date.now()): PinState 
 export const canSendAnotherPin = (pin: VisitPin | undefined) => (pin?.issued ?? 0) < VISIT_PIN_MAX_ISSUES;
 export const formatPin = (code: string) => `${code.slice(0, 3)} ${code.slice(3)}`;
 
-/** Create a fresh PIN for the resident. Returns false when the job is unknown or the re-send limit is used up. */
+/** Create a fresh Visit code for the technician to give the resident. Returns false when the job is unknown or the limit is used up. */
 export function issueVisitPin(id: string): boolean {
   const job = dispatchStore.get()[id];
   if (!job || !canSendAnotherPin(job.pin)) return false;
@@ -94,7 +96,7 @@ export function issueVisitPin(id: string): boolean {
   return true;
 }
 
-/** The technician's GPS placed them at the job. A home outage now waits for the resident's PIN; any other job goes straight to "On site". */
+/** The technician's GPS placed them at the job. A home outage now waits for the resident to enter the Visit code; any other job goes straight to "On site". */
 export function recordArrival(id: string, distanceM: number, needsEntry: boolean, note?: string) {
   patchDispatch(id, { arrival: { at: Date.now(), distanceM } });
   if (needsEntry) {
@@ -106,8 +108,8 @@ export function recordArrival(id: string, distanceM: number, needsEntry: boolean
 
 /**
  * Arrival without a usable GPS reading. The job carries on and the step is flagged, because the phone's
- * position could not back it up. A home outage still asks the resident for their Visit PIN afterwards,
- * so the resident's own confirmation is never skipped by this.
+ * position could not back it up. A home outage still asks the resident to enter the Visit code afterwards,
+ * so the resident's own check of the technician is never skipped by this.
  */
 export function recordManualArrival(id: string, needsEntry: boolean, reason: string, note?: string) {
   patchDispatch(id, { arrival: { at: Date.now(), distanceM: -1 } });
@@ -120,8 +122,11 @@ export function recordManualArrival(id: string, needsEntry: boolean, reason: str
 
 export type PinResult = { status: "ok" } | { status: "wrong"; attemptsLeft: number } | { status: "locked" } | { status: "expired" } | { status: "none" };
 
-/** Check the PIN the resident read out. Three wrong tries lock it; a correct one is used up and moves the job to "On site". */
-export function verifyVisitPin(id: string, code: string, note?: string): PinResult {
+/**
+ * The resident enters the code the technician gave them. Three wrong tries lock it; a correct one is used up,
+ * confirms the technician is the one assigned, and moves the job to "On site".
+ */
+export function verifyVisitPin(id: string, code: string): PinResult {
   const job = dispatchStore.get()[id];
   const pin = job?.pin;
   const state = pinState(pin);
@@ -139,15 +144,15 @@ export function verifyVisitPin(id: string, code: string, note?: string): PinResu
   }
   patchDispatch(id, { pin: { ...pin, usedAt: Date.now() } });
   const gps = job.arrival && job.arrival.distanceM >= 0 ? `GPS puts the technician ${formatDistance(job.arrival.distanceM)} from the reported location.` : undefined;
-  updateJob(id, 2, joinNotes("Arrival confirmed with the resident's Visit PIN.", gps, note));
+  updateJob(id, STAGE.onSite, joinNotes("The resident entered the technician's Visit code and confirmed who is at the gate.", gps), undefined, "resident");
   return { status: "ok" };
 }
 
-/** The resident cannot give the PIN. The job carries on, flagged, and the PIN stops working. */
+/** The resident cannot enter the code. The job carries on, flagged, and the code stops working. */
 export function startWithoutPin(id: string, reason: string, note?: string) {
   const pin = dispatchStore.get()[id]?.pin;
   if (pin && !pin.usedAt) patchDispatch(id, { pin: { ...pin, usedAt: Date.now() } });
-  updateJob(id, 2, joinNotes(`Started without the resident's PIN: ${reason}.`, note), "Started without the resident's PIN");
+  updateJob(id, 2, joinNotes(`Started without the resident's Visit code check: ${reason}.`, note), "Started without the resident's Visit code check");
 }
 
 /** Home outage: the technician says the repair is done and asks the resident to confirm the power is back. */
@@ -175,8 +180,8 @@ export function visitStatus(dispatch: Dispatch): string | null {
   const stage = dispatch.stage ?? -1;
   if (stage === 1 && dispatch.arrival) {
     const state = pinState(dispatch.pin);
-    if (state === "active") return "At the property · waiting for the resident's Visit PIN";
-    if (state === "locked" || state === "expired") return `Visit PIN ${state} · the technician can send a new one`;
+    if (state === "active") return "At the property · waiting for the resident to enter the Visit code";
+    if (state === "locked" || state === "expired") return `Visit code ${state} · the technician can make a new one`;
   }
   if (stage === STAGE.testing && dispatch.completion) {
     if (!dispatch.completion.answer) return "Repair finished · waiting for the resident to confirm the power is back";

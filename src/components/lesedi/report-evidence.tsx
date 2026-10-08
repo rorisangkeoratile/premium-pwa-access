@@ -22,7 +22,7 @@ export function ReportEvidence({ report }: { report: OutageReport }) {
       <p className="text-xs text-muted-foreground">
         {report.reporter} · {report.contact}{report.account ? ` · Meter or account ${report.account}` : ""}
       </p>
-      {isHomeOutage(report) && <p className="rounded-md bg-secondary p-3 text-xs"><strong>Home visit.</strong> The technician may need to be let in, so the resident gets a Visit PIN to read out at the gate.</p>}
+      {isHomeOutage(report) && <p className="rounded-md bg-secondary p-3 text-xs"><strong>Home visit.</strong> The technician may need to be let in. On arrival their app shows a Visit code, and the resident enters it in their app to check the technician before opening the gate.</p>}
       {report.photos.length > 0 && (
         <div className="grid grid-cols-3 gap-2">
           {report.photos.map((src, index) => (

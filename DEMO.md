@@ -43,8 +43,12 @@ Open four tabs: **Nomsa** (resident), **Naledi** (dispatcher), **Mpho** (technic
 
 Other things worth showing:
 
-- **A home visit with a PIN:** a resident chooses "Just my home". When the technician arrives, the resident gets a 6-digit Visit PIN to read out at the gate, and confirms "Yes, my power is back" at the end.
-- **Duplicates:** a second resident near an existing outage is offered "Follow this outage" instead of filing another report.
+- **A home visit with a Visit code:** a resident chooses "Just my home". When the technician taps "I've arrived", **the technician's app shows a 6-digit Visit code**. They give it to the resident, who enters it on their dashboard to confirm this is the technician the city sent. The job then moves to "On site". At the end the resident confirms "Yes, my power is back".
+- **Complaint lists:** after choosing what is happening, the resident picks the exact problem from a drop-down list. Free text appears only for "Something else", and is limited to 100 characters.
+- **Duplicates:** when a second resident picks the **same type and the same complaint within 1 km** of an open report, the app shows "This problem is already reported nearby" and offers "Follow this outage". If they send it anyway, the report is merged. Complaints that describe the same fault in different words count as the same: "The whole street has no power" and "Several houses have no power" are one fault. "Just my home" and "Something else" reports are never merged.
+- **Related, not duplicate:** cut power in an area, then report damage or "Just my home" inside it as a resident. The resident is told the sensors already know about the outage. For a home outage they are offered "Follow the outage" instead. The dispatcher sees "Probably related" on both incidents, with the crew already working the outage, so one crew can handle both.
+- **Maps that follow the action:** the technician and resident maps keep everyone in view as they move. Zoom or drag the map and it stays where you put it. Tap **Show everything** to bring everyone back into view.
+- **Additional crew:** a technician on a job opens **Request additional crew** at the bottom of their job panel, picks a reason and how many extra technicians they need, and sends it. Every other technician gets an alert with **Accept** and **Decline**, in the pop-up, in the bell and on their dashboard. The one who accepts gets the route, ETA, turn list and "Simulate drive" to that job, then taps "I've arrived to help". The requester sees who is coming and each helper's ETA. The dispatcher sees the request in the job feed and on the crew board. Open two technician tabs to show it.
 - **Storm scenario:** the "Storm" button cuts three areas at once, so the queue fills up and you can dispatch several crews.
 - **Who is online:** the dispatcher's header shows how many crews and dispatchers are online, and a technician whose window is closed shows as offline.
 

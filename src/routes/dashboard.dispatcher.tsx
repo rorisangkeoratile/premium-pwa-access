@@ -11,11 +11,13 @@ import { mockUsers, technicians, type MockUser, type Priority } from "@/componen
 import { currentUser } from "@/lib/auth";
 import { distanceKm } from "@/lib/geo";
 import { JobFeed, LinkedReports } from "@/components/lesedi/job-progress";
-import { STAGE, assignJob, crewStore, dispatchStore, isResolved, reportStore, stageNames, toIncident } from "@/lib/reports";
+import { STAGE, assignJob, complaintText, crewStore, dispatchStore, isResolved, reportStore, stageNames, toIncident } from "@/lib/reports";
+import { TICKET_RADIUS_KM, nearbyTicket } from "@/lib/dedup";
 import { closeIncident, feedbackStore } from "@/lib/feedback";
 import { crewStatus, formatDuration, incidentRows, summarise } from "@/lib/metrics";
 import { statusStore, ticketStore, ticketToIncident } from "@/lib/nodes";
 import { followStore, followerCount } from "@/lib/incidents";
+import { crewRequestStore, openRequestFor, supportingFor } from "@/lib/crew-requests";
 import { onlineEmails, useClock, usePresence } from "@/lib/presence";
 
 export const Route = createFileRoute("/dashboard/dispatcher")({
@@ -50,6 +52,7 @@ function DispatcherDashboard() {
   const nodeStatus = statusStore.use();
   const follows = followStore.use();
   const feedback = feedbackStore.use();
+  const crewRequests = crewRequestStore.use();
   const presence = usePresence();
   const now = useClock(3000);
   const online = useMemo(() => onlineEmails(presence, now), [presence, now]);
@@ -72,6 +75,11 @@ function DispatcherDashboard() {
   const selectedReport = selected ? reports.find((item) => item.id === selected.id) : undefined;
   const selectedTicket = selected ? tickets.find((item) => item.id === selected.id && !item.restoredAt) : undefined;
   const linked = selected ? reports.filter((item) => item.duplicateOf === selected.id) : [];
+  // Not duplicates, but probably one fault: a report (damage, a home) inside an outage the sensors detected.
+  // Area reports there were already merged, so what is left here is worth sending the same crew to.
+  const relatedTicket = selectedReport ? nearbyTicket(selectedReport, tickets) : undefined;
+  const relatedReports = selectedTicket ? reports.filter((item) => !item.duplicateOf && !isResolved(dispatches[item.id]?.stage) && distanceKm(item, selectedTicket) <= TICKET_RADIUS_KM) : [];
+  const relatedCrew = relatedTicket ? dispatches[relatedTicket.id]?.tech : undefined;
   const dispatched = selected ? dispatches[selected.id] : undefined;
   const selectedOpenedAt = entries.find((entry) => entry.incident.id === selected?.id)?.openedAt ?? Date.now();
 
@@ -173,7 +181,20 @@ function DispatcherDashboard() {
               </div>
               {selectedReport ? <div className="mt-4"><ReportEvidence report={selectedReport} /></div> : selectedTicket ? <div className="mt-4"><AutoTicketDetail ticket={selectedTicket} /></div> : null}
               {linked.length > 0 && <div className="mt-4"><LinkedReports reports={linked} /></div>}
-              {dispatched && <div className="mt-4"><JobFeed dispatch={dispatched} openedAt={selectedOpenedAt} /></div>}
+              {relatedTicket && (
+                <p className="mt-4 rounded-md border border-primary bg-secondary p-3 text-xs">
+                  <strong>Probably related:</strong> this is inside the {relatedTicket.areaName} outage our sensors detected (<button className="font-bold text-primary underline" onClick={() => setSelectedId(relatedTicket.id)}>{relatedTicket.id}</button>){relatedCrew ? `, which ${relatedCrew} is working. Consider sending ${relatedCrew.split(" ")[0]} so one crew handles both.` : ", which has no crew yet. One crew can handle both."}
+                </p>
+              )}
+              {relatedReports.length > 0 && (
+                <div className="mt-4 rounded-md border border-primary bg-secondary p-3 text-xs">
+                  <p><strong>{relatedReports.length} resident report{relatedReports.length === 1 ? "" : "s"} inside this outage.</strong> Damage reported here may be the cause, so tell the crew.</p>
+                  <ul className="mt-2 space-y-1">
+                    {relatedReports.map((report) => <li key={report.id}><button className="font-bold text-primary underline" onClick={() => setSelectedId(report.id)}>{report.id}</button> · {report.type} · {complaintText(report) || "No details"}</li>)}
+                  </ul>
+                </div>
+              )}
+              {dispatched && <div className="mt-4"><JobFeed dispatch={dispatched} openedAt={selectedOpenedAt} crew={selected ? openRequestFor(selected.id, crewRequests, dispatches) : undefined} /></div>}
               <div className="mt-4 grid max-h-72 gap-2 overflow-y-auto sm:grid-cols-2 xl:grid-cols-3">
                 {crew.map(({ tech, status, job, online: isOnline }) => (
                   <button key={tech.name} disabled={status !== "Available"} onClick={() => setAssigned(tech.name)} className={`rounded-md border p-3 text-left transition-colors disabled:opacity-50 ${assigned === tech.name ? "border-primary bg-secondary" : "border-border bg-card hover:border-primary"}`}>
@@ -227,12 +248,14 @@ function DispatcherDashboard() {
             <div className="mt-3 max-h-80 divide-y divide-border overflow-y-auto">
               {crew.map(({ tech, status, job, online: isOnline }) => {
                 const stage = job ? (job.dispatch.stage ?? -1) : undefined;
+                const helping = supportingFor(tech.name, crewRequests, dispatches)[0];
                 return (
                   <div key={tech.name} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3">
                     <div className="min-w-0">
                       <p className="flex items-center gap-2 truncate text-sm font-bold"><span className={`size-2 shrink-0 rounded-full ${isOnline ? "bg-success" : "bg-muted-foreground/40"}`} />{tech.name}</p>
                       <p className="text-xs text-muted-foreground">{tech.skill} · {tech.depot}{selected ? ` · ${crewDistance(tech)} from selected` : ""}</p>
                       {job && <p className="text-xs font-bold text-primary">{job.id} · {stage === undefined || stage < 0 ? "Assigned" : stageNames[stage]}</p>}
+                      {helping && <p className="text-xs font-bold text-primary">Helping {helping.by.split(" ")[0]} · {helping.jobId} · {helping.responses[tech.name]?.arrivedAt ? "on site" : "on the way"}</p>}
                     </div>
                     <span className={`rounded px-2 py-1 text-[10px] font-extrabold uppercase ${status === "Available" ? "bg-success-soft text-success" : "bg-warning-soft text-foreground"}`}>{status}</span>
                   </div>

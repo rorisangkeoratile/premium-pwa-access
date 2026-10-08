@@ -10,6 +10,60 @@ export type OutageType = (typeof outageTypes)[number];
 export const HOME_OUTAGE: OutageType = "Home outage";
 export const isHomeOutage = (report: { type: string }) => report.type === HOME_OUTAGE;
 
+/**
+ * What exactly is wrong, picked from a list instead of typed, so every report reads the same way to the
+ * control centre and two reports of the same problem can be recognised as duplicates. Only "Something else"
+ * asks for a short note.
+ */
+export const OTHER_COMPLAINT = "Something else";
+export const OTHER_NOTE_MAX = 100;
+export const complaintsByType: Record<OutageType, readonly string[]> = {
+  "Home outage": [
+    "No power in the whole house",
+    "Some plugs or rooms have no power",
+    "Prepaid meter shows an error or rejects tokens",
+    "Main switch keeps tripping",
+    "Lights dim or flicker",
+    OTHER_COMPLAINT,
+  ],
+  "Street or area outage": [
+    "The whole street has no power",
+    "Several houses have no power",
+    "Power keeps going off and on",
+    "Low voltage: lights dim and appliances struggle",
+    "Streetlights are off",
+    OTHER_COMPLAINT,
+  ],
+  "Damaged equipment or hazard": [
+    "Fallen or low-hanging power line",
+    "Sparks, fire or smoke from equipment",
+    "Damaged or leaning pole",
+    "Mini-substation or meter box open or damaged",
+    "Exposed or stolen cables",
+    "Loud bang from a transformer",
+    OTHER_COMPLAINT,
+  ],
+};
+
+/**
+ * Complaints that are the same fault seen from different houses. Neighbours on one feeder describe one fault
+ * in different words ("the whole street" from one house, "several houses" from another), so for duplicates
+ * these count as the same complaint. A complaint not listed here only matches itself.
+ */
+const faultGroups: Record<string, string> = {
+  "The whole street has no power": "no supply",
+  "Several houses have no power": "no supply",
+  "Power keeps going off and on": "unstable supply",
+  "Low voltage: lights dim and appliances struggle": "unstable supply",
+  "Sparks, fire or smoke from equipment": "equipment failing",
+  "Loud bang from a transformer": "equipment failing",
+};
+export const faultOf = (complaint: string) => faultGroups[complaint] ?? complaint;
+
+/** The complaint in words: the chosen item, or the resident's short note for "Something else". Older reports only have the note. */
+export const complaintText = (report: Pick<OutageReport, "complaint" | "description">) =>
+  !report.complaint ? report.description : report.complaint === OTHER_COMPLAINT ? report.description || OTHER_COMPLAINT : report.complaint;
+
 /** A citizen's outage report. Location and media travel with it to every dashboard. */
 export type OutageReport = {
   id: string;
@@ -24,7 +78,9 @@ export type OutageReport = {
   /** The cell number the crew should call: the one on the resident's account unless they changed it. */
   contact: string;
   type: OutageType;
-  /** The resident's optional note. */
+  /** The problem picked from `complaintsByType`. Missing on reports saved before the list existed. */
+  complaint?: string | undefined;
+  /** The resident's short note, only asked for when the complaint is "Something else". */
   description: string;
   lat: number;
   lng: number;
@@ -132,7 +188,7 @@ export function toIncident(report: OutageReport, linked = 0, followers = 0): Inc
   return {
     id: report.id,
     place: report.address || "Outage location",
-    detail: report.description ? `${report.type} · ${report.description}` : report.type,
+    detail: complaintText(report) ? `${report.type} · ${complaintText(report)}` : report.type,
     // Reports saved before the outage types changed keep their old type text, so fall back to Medium.
     priority: escalate(priorityByType[report.type] ?? "Medium", affected),
     people: `${affected} affected · ${linked + 1} report${linked === 0 ? "" : "s"}${followers > 0 ? ` · ${followers} following` : ""}`,

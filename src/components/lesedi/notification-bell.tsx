@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import type { MockUser } from "@/components/lesedi/data";
+import { pendingFor, respondToCrew } from "@/lib/crew-requests";
 import { useClock } from "@/lib/presence";
 import { alertDevice, askDevicePermission, devicePermission, markRead, noticeSeenStore, noticesFor, type Notice } from "@/lib/notifications";
 import { ago } from "@/lib/reports";
@@ -13,9 +14,11 @@ const toneIcon = { info: Info, success: CircleCheck, warn: BellRing, danger: Tri
 const toneColour = { info: "text-primary", success: "text-success", warn: "text-warning-foreground", danger: "text-destructive" } as const;
 const when = (at: number) => (ago(at) === "Just now" ? "Just now" : `${ago(at)} ago`);
 
-function announce(notice: Notice) {
+function announce(notice: Notice, respond?: (answer: "accepted" | "declined") => void) {
   const show = notice.tone === "success" ? toast.success : notice.tone === "danger" ? toast.error : notice.tone === "warn" ? toast.warning : toast.info;
-  show(notice.title, { description: notice.body, duration: 8000 });
+  // A request for more crew can be answered straight from the pop-up, and stays up longer so it is not missed.
+  if (respond) show(notice.title, { description: notice.body, duration: 30000, action: { label: "Accept", onClick: () => respond("accepted") }, cancel: { label: "Decline", onClick: () => respond("declined") } });
+  else show(notice.title, { description: notice.body, duration: 8000 });
   // Someone looking at another window or app still gets the alert.
   if (document.hidden || !document.hasFocus()) alertDevice(notice);
 }
@@ -34,7 +37,11 @@ export function NotificationBell({ user }: { user: MockUser }) {
   const wrapper = useRef<HTMLDivElement>(null);
   const known = useRef<Set<string> | null>(null);
 
-  const notices = useMemo(() => noticesFor(user, world), [user, world.reports, world.tickets, world.dispatches, world.follows]); // eslint-disable-line react-hooks/exhaustive-deps
+  const notices = useMemo(() => noticesFor(user, world), [user, world.reports, world.tickets, world.dispatches, world.follows, world.crewRequests]); // eslint-disable-line react-hooks/exhaustive-deps
+  const awaitingAnswer = useMemo(() => new Set(user.role === "Technician" ? pendingFor(user.name, world.crewRequests, world.dispatches).map((request) => request.id) : []), [user, world.crewRequests, world.dispatches]);
+  const answer = (requestId: string, choice: "accepted" | "declined") => {
+    if (!respondToCrew(requestId, user.name, choice)) toast.info("That request is no longer open", { description: "Someone else may have filled it, or it was cancelled." });
+  };
   const lastRead = seen[user.email] ?? 0;
   const unread = notices.filter((notice) => notice.at > lastRead).length;
 
@@ -49,8 +56,8 @@ export function NotificationBell({ user }: { user: MockUser }) {
     const fresh = notices.filter((notice) => !known.current?.has(notice.id));
     if (fresh.length === 0) return;
     for (const notice of fresh) known.current.add(notice.id);
-    for (const notice of [...fresh].reverse()) announce(notice);
-  }, [notices]);
+    for (const notice of [...fresh].reverse()) announce(notice, notice.crewRequest && awaitingAnswer.has(notice.crewRequest) ? (choice) => answer(notice.crewRequest!, choice) : undefined);
+  }, [notices]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!open) return;
@@ -93,6 +100,12 @@ export function NotificationBell({ user }: { user: MockUser }) {
                     <p className="text-sm font-bold">{notice.title}</p>
                     <p className="text-xs text-muted-foreground">{notice.body}</p>
                     <p className="mt-0.5 text-[11px] text-muted-foreground">{when(notice.at)}</p>
+                    {notice.crewRequest && awaitingAnswer.has(notice.crewRequest) && (
+                      <div className="mt-2 flex gap-2">
+                        <Button size="sm" className="min-h-9" onClick={() => answer(notice.crewRequest!, "accepted")}>Accept</Button>
+                        <Button size="sm" variant="outline" className="min-h-9" onClick={() => answer(notice.crewRequest!, "declined")}>Decline</Button>
+                      </div>
+                    )}
                   </div>
                 </li>
               );
