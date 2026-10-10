@@ -66,7 +66,7 @@ export function DashboardShell({ user, role, home, children }: { user: string; r
               {live ? "All systems live" : starting ? "Starting…" : "Connecting sensors…"}
             </div>
             <ThemeToggle />
-            {session && <NotificationBell user={session} />}
+            {session && <div data-tour="notifications"><NotificationBell user={session} /></div>}
             <div className="flex items-center gap-2 border-l border-border pl-2 sm:pl-4">
               <div className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary text-xs font-extrabold text-primary" title={`${user} · ${role}`}>
                 {initials}
@@ -86,7 +86,8 @@ export function DashboardShell({ user, role, home, children }: { user: string; r
 }
 
 export function PageHeading({ eyebrow, title, text, action }: { eyebrow: string; title: string; text: string; action?: ReactNode }) {
-  return <div className="mb-6 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4"><div className="min-w-0"><p className="text-[11px] font-extrabold uppercase text-primary">{eyebrow}</p><h1 className="mt-1 text-2xl font-extrabold text-navy sm:text-3xl">{title}</h1><p className="mt-1 text-sm text-muted-foreground">{text}</p></div>{action}</div>;
+  // On a phone the action goes under the heading, so the heading text keeps the full width.
+  return <div className="mb-6 grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"><div className="min-w-0"><p className="text-[11px] font-extrabold uppercase text-primary">{eyebrow}</p><h1 className="mt-1 text-2xl font-extrabold text-navy sm:text-3xl">{title}</h1><p className="mt-1 text-sm text-muted-foreground">{text}</p></div>{action}</div>;
 }
 
 export function Stat({ label, value, note, icon: Icon, alert = false }: { label: string; value: string; note: string; icon: typeof Activity; alert?: boolean }) {

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
-import { Bell, BellOff, Camera, Check, CheckCircle2, Clock3, FileText, Film, House, Image as ImageIcon, LocateFixed, Megaphone, Pencil, Radio, TriangleAlert, Users, X, Zap } from "lucide-react";
+import { Bell, BellOff, Camera, Check, CheckCircle2, Clock3, Compass, FileText, Film, House, Image as ImageIcon, LocateFixed, Megaphone, Pencil, Radio, TriangleAlert, Users, X, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,9 @@ import { IncidentTracker } from "@/components/lesedi/incident-tracker";
 import { FeedbackCard, type FeedbackSubject } from "@/components/lesedi/feedback-card";
 import { feedbackStore, followerFeedbackId } from "@/lib/feedback";
 import { ResidentVisitCards } from "@/components/lesedi/visit-pin";
+import { GuidedTour } from "@/components/lesedi/guided-tour";
+import { customerTourSteps } from "@/components/lesedi/customer-tour";
+import { hasSeenTour, markTourSeen } from "@/lib/tour";
 import { currentUser, type MockUser } from "@/lib/auth";
 import { detectPosition, distanceKm, reverseGeocode } from "@/lib/geo";
 import { MAX_PHOTOS, MAX_VIDEO_MB, compressPhoto } from "@/lib/media";
@@ -69,6 +72,18 @@ function CustomerDashboard() {
 
   const [me, setMe] = useState<MockUser | null>(null);
   useEffect(() => setMe(currentUser()), []);
+  // The guide opens by itself on a resident's first visit, once the page has settled. Finishing or skipping
+  // it marks it as seen, so it does not come back; "How it works" opens it again on request.
+  const [touring, setTouring] = useState(false);
+  useEffect(() => {
+    if (!me || hasSeenTour(me.email)) return;
+    const timer = setTimeout(() => setTouring(true), 800);
+    return () => clearTimeout(timer);
+  }, [me]);
+  function endTour() {
+    if (me) markTourSeen(me.email);
+    setTouring(false);
+  }
   const areaOutage = me?.areaId ? tickets.find((ticket) => ticket.areaId === me.areaId && !ticket.restoredAt) : undefined;
 
   // Name and cell number come from the account. Only a changed number and the meter number are remembered on the device.
@@ -318,7 +333,12 @@ function CustomerDashboard() {
 
   return (
     <DashboardShell home="/dashboard/customer" user={me?.name ?? "Resident"} role={`Resident · ${me?.area ?? "Tshwane"}`}>
-      <PageHeading eyebrow="Customer" title="My power" text="Report a fault, follow the repair and stay ahead of planned interruptions." action={<Button asChild size="lg" className="min-h-12"><a href="#report-form" onClick={() => { if (!pin && !locating) void detect(); }}><Megaphone /> Report an outage</a></Button>} />
+      <PageHeading eyebrow="Customer" title="My power" text="Report a fault, follow the repair and stay ahead of planned interruptions." action={
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <Button variant="outline" size="lg" className="min-h-12" data-tour="tour-replay" onClick={() => setTouring(true)}><Compass /> How it works</Button>
+          <Button asChild size="lg" className="min-h-12" data-tour="report-button"><a href="#report-form" onClick={() => { if (!pin && !locating) void detect(); }}><Megaphone /> Report an outage</a></Button>
+        </div>
+      } />
 
       {/* Time-critical, so it comes first: the technician may be waiting at the gate for this PIN. */}
       {mine.map((report) => {
@@ -331,7 +351,7 @@ function CustomerDashboard() {
       ))}
 
       {home && (
-        <section className={`mt-5 rounded-md border p-4 ${homeIncidents.length > 0 ? "border-destructive bg-danger-soft" : "border-border bg-card"}`} aria-labelledby="home-title">
+        <section data-tour="home" className={`mt-5 rounded-md border p-4 ${homeIncidents.length > 0 ? "border-destructive bg-danger-soft" : "border-border bg-card"}`} aria-labelledby="home-title">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="max-w-2xl">
               <p className="text-[10px] font-extrabold uppercase text-primary">Home · {home.name}</p>
@@ -344,7 +364,7 @@ function CustomerDashboard() {
       )}
       {homeIncidents.map((incident) => <div key={incident.id} className="mt-5"><IncidentTracker incident={incident} label={`Outage at your home area · ${home?.name ?? ""}`} /></div>)}
 
-      <section className="mt-5 rounded-md border border-border bg-card p-4" aria-labelledby="area-title">
+      <section data-tour="area-check" className="mt-5 rounded-md border border-border bg-card p-4" aria-labelledby="area-title">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-2xl">
             <h2 id="area-title" className="font-extrabold text-navy">Power out in your area?</h2>
@@ -375,7 +395,7 @@ function CustomerDashboard() {
         ))}
       </section>
 
-      {myIncident && <div className="mt-5"><IncidentTracker incident={myIncident} own={Boolean(ownPoint)} point={ownPoint} /></div>}
+      {myIncident && <div className="mt-5" data-tour="my-tracker"><IncidentTracker incident={myIncident} own={Boolean(ownPoint)} point={ownPoint} /></div>}
       {followed.map((incident) => <div key={incident.id} className="mt-5"><IncidentTracker incident={incident} onUnfollow={() => unfollow(incident.id, resident)} /></div>)}
 
       {latest && (
@@ -412,7 +432,7 @@ function CustomerDashboard() {
             <h2 className="font-extrabold text-navy">Report an outage</h2>
             <p className="mt-1 text-xs text-muted-foreground">We use the name and cell number on your account, so there is nothing to type. Pick what is wrong from the lists and send.</p>
 
-            <section className="mt-5" aria-labelledby="where-title">
+            <section className="mt-5" data-tour="report-location" aria-labelledby="where-title">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-secondary p-3">
                 <div className="min-w-0">
                   <p id="where-title" className="text-sm font-extrabold text-navy">Where is the fault?</p>
@@ -436,7 +456,7 @@ function CustomerDashboard() {
               )}
             </section>
 
-            <fieldset className="mt-6">
+            <fieldset className="mt-6" data-tour="report-type">
               <legend className="text-sm font-extrabold text-navy">What is happening?</legend>
               <div className="mt-3 grid gap-3 md:grid-cols-3">
                 {typeChoices.map(({ type, title, text, icon: Icon }) => (
@@ -510,7 +530,7 @@ function CustomerDashboard() {
               </div>
             )}
 
-            <div className="mt-5 rounded-md border border-border p-3 text-sm">
+            <div className="mt-5 rounded-md border border-border p-3 text-sm" data-tour="report-contact">
               {editingPhone ? (
                 <Field id="phone" label="Cell number the crew should call" error={errors.phone}>
                   <Input id="phone" type="tel" inputMode="tel" autoComplete="tel" aria-invalid={Boolean(errors.phone)} value={phone} onChange={(event) => { setPhoneEdit(event.target.value); setErrors((current) => ({ ...current, phone: undefined })); }} placeholder="e.g. 082 000 0000" className="h-11" />
@@ -523,7 +543,7 @@ function CustomerDashboard() {
               )}
             </div>
 
-            <details className="mt-5 rounded-md border border-border p-4">
+            <details className="mt-5 rounded-md border border-border p-4" data-tour="report-extras">
               <summary className="min-h-8 cursor-pointer text-sm font-extrabold text-navy">Add a landmark or photo <span className="font-normal text-muted-foreground">(optional)</span></summary>
               <div className="mt-4 space-y-5">
                 <Field id="landmark" label="Landmark or house number" hint="Helps the crew find the exact spot, e.g. the blue gate next to the spaza shop."><Input id="landmark" autoComplete="off" maxLength={60} value={landmark} onChange={(event) => setLandmark(event.target.value)} className="h-11" /></Field>
@@ -556,7 +576,7 @@ function CustomerDashboard() {
               </div>
             </details>
 
-            <div className="mt-5 flex flex-col gap-2 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-5 flex flex-col gap-2 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between" data-tour="report-send">
               <p className="text-xs text-muted-foreground sm:max-w-sm">You agreed to be contacted about your reports when you signed up. If your connection drops, your report is saved and sent automatically.</p>
               <Button className="min-h-12 w-full text-base sm:w-auto sm:min-w-64" type="submit" disabled={blocked} aria-describedby={blocked || submitError ? "send-blocked" : undefined}><Zap /> Send outage report</Button>
             </div>
@@ -565,7 +585,7 @@ function CustomerDashboard() {
         )}
       </div>
 
-      <section className="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Account summary">
+      <section className="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Account summary" data-tour="summary">
         <Stat label="Supply status" value="Restored" note="Since 04:12 today" icon={Zap} />
         <Stat label="Open reports" value={String(openMine.length)} note={openMine[0] ? `${openMine[0].id} in progress` : "No open reports"} icon={FileText} />
         <Stat label="Next planned outage" value="Thu 09:00" note="Maintenance · 3 hours" icon={Clock3} />
@@ -573,7 +593,7 @@ function CustomerDashboard() {
       </section>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-2">
-        <section className="rounded-md border border-border bg-card p-5">
+        <section className="rounded-md border border-border bg-card p-5" data-tour="notices">
           <h2 className="font-extrabold text-navy">Notices for your area</h2>
           <div className="mt-4 space-y-3">
             {[...(areaOutage ? [["Outage in your area", `Detected automatically ${ago(areaOutage.openedAt)} ago. A crew is being arranged, no report needed.`]] : []), ["Planned maintenance", `Thursday 09:00 – 12:00 · ${me?.area ?? "Your area"} feeder`], ["Load reduction", "Evening peak 18:00 – 20:00 · Stage 2"]].map(([title, text]) => (
@@ -581,7 +601,7 @@ function CustomerDashboard() {
             ))}
           </div>
         </section>
-        <section className="rounded-md border border-border bg-card p-5">
+        <section className="rounded-md border border-border bg-card p-5" data-tour="history">
           <h2 className="font-extrabold text-navy">My report history</h2>
           <div className="mt-3 divide-y divide-border">
             {[...mine.map((item) => {
@@ -598,6 +618,8 @@ function CustomerDashboard() {
           </div>
         </section>
       </div>
+
+      <GuidedTour steps={customerTourSteps(me?.name.split(" ")[0] ?? "there")} open={touring} onClose={endTour} />
     </DashboardShell>
   );
 }
