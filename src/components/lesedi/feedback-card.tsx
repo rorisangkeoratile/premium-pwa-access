@@ -5,13 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { FEEDBACK_TAGS, RATING_WORDS, submitFeedback } from "@/lib/feedback";
 import { formatDuration } from "@/lib/metrics";
-import type { OutageReport } from "@/lib/reports";
+
+/** Who is giving feedback on which incident. `id` is the report id, or `followerFeedbackId` for a follower. */
+export type FeedbackSubject = { id: string; incidentId: string; by: string; opener: boolean; follower: boolean };
 
 /**
  * Asks a resident how the city did, once their outage is resolved. The person who opened the incident
- * closes it by answering; a resident whose report was merged into it just adds their rating.
+ * closes it by answering; a resident whose report was merged into it, or who followed it, just adds their rating.
  */
-export function FeedbackCard({ report, area, resolvedIn, onLater }: { report: OutageReport; area: string; resolvedIn: number | undefined; onLater: () => void }) {
+export function FeedbackCard({ subject, area, resolvedIn, onLater }: { subject: FeedbackSubject; area: string; resolvedIn: number | undefined; onLater: () => void }) {
   const [rating, setRating] = useState(0);
   const [hover, setHover] = useState(0);
   const [informed, setInformed] = useState<boolean | null>(null);
@@ -19,6 +21,8 @@ export function FeedbackCard({ report, area, resolvedIn, onLater }: { report: Ou
   const [comment, setComment] = useState("");
   const [error, setError] = useState("");
   const shown = hover || rating;
+  /** Safe for element ids: report ids start with "#" and follower ids contain an email. */
+  const key = subject.id.replace(/[^A-Za-z0-9-]/g, "-");
 
   function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -27,18 +31,18 @@ export function FeedbackCard({ report, area, resolvedIn, onLater }: { report: Ou
       return;
     }
     submitFeedback(
-      { reportId: report.id, incidentId: report.duplicateOf ?? report.id, by: report.reporter, rating, keptInformed: informed ?? true, tags, ...(comment.trim() ? { comment: comment.trim() } : {}) },
-      !report.duplicateOf,
+      { reportId: subject.id, incidentId: subject.incidentId, by: subject.by, rating, keptInformed: informed ?? true, tags, ...(comment.trim() ? { comment: comment.trim() } : {}), ...(subject.follower ? { follower: true } : {}) },
+      subject.opener,
     );
   }
 
   const toggle = (tag: string) => setTags((current) => (current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]));
 
   return (
-    <form onSubmit={send} className="mt-5 rounded-md border-2 border-success bg-card p-5" aria-labelledby={`feedback-${report.id}`}>
-      <p className="flex items-center gap-2 text-[10px] font-extrabold uppercase text-success"><MessageSquareHeart className="size-4" /> Resolved · {report.id}</p>
-      <h2 id={`feedback-${report.id}`} className="mt-2 text-lg font-extrabold text-navy">How did we do?</h2>
-      <p className="mt-1 text-sm text-muted-foreground">Your outage in {area} is resolved{resolvedIn !== undefined ? `, ${formatDuration(resolvedIn)} after you reported it` : ""}. Your rating goes to the electricity department and helps the city serve your community better.</p>
+    <form onSubmit={send} className="mt-5 rounded-md border-2 border-success bg-card p-5" aria-labelledby={`feedback-${key}`}>
+      <p className="flex items-center gap-2 text-[10px] font-extrabold uppercase text-success"><MessageSquareHeart className="size-4" /> Resolved · {subject.follower ? `outage you followed · ${subject.incidentId}` : subject.id}</p>
+      <h2 id={`feedback-${key}`} className="mt-2 text-lg font-extrabold text-navy">How did we do?</h2>
+      <p className="mt-1 text-sm text-muted-foreground">{subject.follower ? `The outage you followed in ${area} is resolved` : `Your outage in ${area} is resolved`}{resolvedIn !== undefined ? `, ${formatDuration(resolvedIn)} after ${subject.follower ? "it was reported" : "you reported it"}` : ""}. Your rating goes to the electricity department and helps the city serve your community better.</p>
 
       <fieldset className="mt-4">
         <legend className="text-sm font-bold">Overall service</legend>
@@ -71,8 +75,8 @@ export function FeedbackCard({ report, area, resolvedIn, onLater }: { report: Ou
         </div>
       </fieldset>
 
-      <label htmlFor={`comment-${report.id}`} className="mt-4 block text-sm font-bold">Comments <span className="font-normal text-muted-foreground">(optional)</span></label>
-      <Textarea id={`comment-${report.id}`} className="mt-2 min-h-20" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell us what went well, or what we could do better" />
+      <label htmlFor={`comment-${key}`} className="mt-4 block text-sm font-bold">Comments <span className="font-normal text-muted-foreground">(optional)</span></label>
+      <Textarea id={`comment-${key}`} className="mt-2 min-h-20" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell us what went well, or what we could do better" />
 
       <div className="mt-4 flex flex-col gap-2 sm:flex-row">
         <Button type="submit" className="min-h-12 sm:min-w-48">Send feedback</Button>

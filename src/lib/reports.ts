@@ -145,6 +145,54 @@ export function assignJob(id: string, tech: string) {
   dispatchStore.set({ ...dispatchStore.get(), [id]: { tech, at, stage: -1, updates: [{ stage: -1, at, note: `Assigned to ${tech} by the control centre`, actor: "control" }] } });
 }
 
+/** A technician turned a job down before accepting it. The job goes back to the control centre's queue. */
+export type JobDecline = { tech: string; at: number; reason: string };
+/** Declines per incident id, oldest first. Kept after the job is reassigned, so the control centre sees the history. */
+export const declineStore = createStore<Record<string, JobDecline[]>>("lesedilink.declines", {});
+export const DECLINE_REASONS = [
+  "Already busy on another job",
+  "Too far away to get there in time",
+  "Vehicle or equipment problem",
+  "Not qualified for this type of fault",
+  "End of shift",
+  "Unsafe to attend right now",
+] as const;
+
+/**
+ * Why a technician cannot answer a job any more, or null if they can. The dispatcher works in another tab, so
+ * the job may have been withdrawn or reassigned since the technician's screen last showed it.
+ */
+function answerProblem(id: string, tech: string): string | null {
+  const dispatch = dispatchStore.get()[id];
+  if (!dispatch) return "This job is no longer assigned to you. The control centre may have withdrawn it.";
+  if (dispatch.tech !== tech) return `The control centre has reassigned this job to ${dispatch.tech}.`;
+  if ((dispatch.stage ?? STAGE.assigned) !== STAGE.assigned) return "You have already accepted this job.";
+  return null;
+}
+
+/** The technician accepts a job assigned to them. Returns an error message when it can no longer be accepted. */
+export function acceptJob(id: string, tech: string, note?: string): string | null {
+  const problem = answerProblem(id, tech);
+  if (problem) return problem;
+  updateJob(id, STAGE.accepted, note || "Accepted the job");
+  return null;
+}
+
+/**
+ * The technician turns a job down, with a reason. The dispatch is withdrawn so the incident is back in the
+ * queue for another crew. Returns an error message when the job can no longer be declined.
+ */
+export function declineJob(id: string, tech: string, reason: string): string | null {
+  if (!reason.trim()) return "Choose a reason, so the control centre knows who to send instead.";
+  const problem = answerProblem(id, tech);
+  if (problem) return problem;
+  const { [id]: _declined, ...rest } = dispatchStore.get();
+  dispatchStore.set(rest);
+  const declines = declineStore.get();
+  declineStore.set({ ...declines, [id]: [...(declines[id] ?? []), { tech, at: Date.now(), reason: reason.trim() }] });
+  return null;
+}
+
 /** A progress update. It is stored once and read by the customer, technician, dispatcher and manager dashboards. */
 export function updateJob(id: string, stage: number, note?: string, flag?: string, actor: NonNullable<JobUpdate["actor"]> = "technician", ertDue?: number) {
   const all = dispatchStore.get();

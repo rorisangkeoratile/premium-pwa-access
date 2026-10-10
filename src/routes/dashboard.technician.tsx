@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Camera, Check, CheckCircle2, ClipboardList, Clock3, ExternalLink, HardHat, Hourglass, LocateFixed, MessageSquareText, Navigation, Package, Play, Square, TimerReset, UsersRound, Wrench } from "lucide-react";
+import { ArrowRight, BellRing, Camera, Check, CheckCircle2, ClipboardList, Clock3, ExternalLink, HardHat, Hourglass, LocateFixed, MessageSquareText, Navigation, Package, Play, Square, TimerReset, UsersRound, Wrench, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -17,8 +17,8 @@ import { crewPosition, crewRequestStore, helpersOf, openRequestFor, pendingFor, 
 import { currentUser } from "@/lib/auth";
 import { detectPosition, useWatchPosition, type GeoFix } from "@/lib/geo";
 import { jobsFor, type Job } from "@/lib/metrics";
-import { useRoute } from "@/lib/routing";
-import { STAGE, ago, crewStore, dispatchStore, isHomeOutage, isResolved, reportStore, stageNames, toIncident, updateJob } from "@/lib/reports";
+import { etaText, useRoute } from "@/lib/routing";
+import { DECLINE_REASONS, STAGE, acceptJob, ago, crewStore, declineJob, dispatchStore, isHomeOutage, isResolved, reportStore, stageNames, toIncident, updateJob } from "@/lib/reports";
 import { DEFAULT_PARTS_ERT, DEFAULT_REPAIR_ERT, PARTS_ERT_CHOICES, REPAIR_ERT_CHOICES, clockTime, currentErt, dueLabel, nextReportDue, type ErtChoice } from "@/lib/ert";
 import { resolvedAt } from "@/lib/incidents";
 import { useClock } from "@/lib/presence";
@@ -75,6 +75,14 @@ function TechnicianDashboard() {
   const [repairErt, setRepairErt] = useState(DEFAULT_REPAIR_ERT);
   const [extendBy, setExtendBy] = useState(EXTEND_CHOICES[0]!.ms);
   const [noteError, setNoteError] = useState("");
+  /** Answering a newly assigned job: the reason picked for declining it, and what is wrong with the answer. */
+  const [declineReason, setDeclineReason] = useState("");
+  const [answerError, setAnswerError] = useState("");
+  /**
+   * The outcome of an answer, shown at the top of the page because the job usually leaves this screen with
+   * it: declined, or refused because the control centre withdrew or reassigned the job in the meantime.
+   */
+  const [answerResult, setAnswerResult] = useState<{ tone: "done" | "error"; text: string } | null>(null);
   const now = useClock(15000);
   const [simulating, setSimulating] = useState(false);
   const simTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -116,6 +124,9 @@ function TechnicianDashboard() {
   // A fresh checklist for each job: ticks from the last job must never look like progress on this one.
   useEffect(() => setChecked([]), [active?.id]);
   useEffect(() => setNoteError(""), [active?.id, stage]);
+  useEffect(() => { setDeclineReason(""); setAnswerError(""); }, [active?.id]);
+  /** The job is assigned but not accepted yet: it must be accepted or declined before any work starts. */
+  const awaitingAnswer = Boolean(active) && stage === STAGE.assigned;
   const openedAt = active ? (active.ticket?.openedAt ?? active.report?.createdAt ?? active.dispatch.at) : 0;
   const ert = activeDispatch ? currentErt(openedAt, activeDispatch) : undefined;
   const reportDue = nextReportDue(activeDispatch);
@@ -170,7 +181,7 @@ function TechnicianDashboard() {
   }, [position.lat, position.lng, openJobs, cityIncidents, fix, simulating, usingSimulated, support, supportIncident?.id, myRequest, crewLocations]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const distanceLabel = route ? `${route.distanceKm.toFixed(1)} km` : "…";
-  const etaLabel = route ? `${route.minutes} min` : "…";
+  const etaLabel = etaText(route, now);
 
   const startOfDay = new Date().setHours(0, 0, 0, 0);
   const closedAt = (job: Job) => resolvedAt(job.dispatch) ?? job.dispatch.at;
@@ -223,6 +234,11 @@ function TechnicianDashboard() {
   function startSimulation() {
     const path = route?.coords;
     if (!path || path.length < 2 || !ME) return;
+    // The drive is the technician heading out, so a job that is only assigned has to be accepted first.
+    if (awaitingAnswer) {
+      setAnswerError("Accept the job before you set off. Decline it if you cannot take it.");
+      return;
+    }
     simulatingRef.current = true;
     simulatedPosition.current = true;
     setUsingSimulated(true);
@@ -235,7 +251,29 @@ function TechnicianDashboard() {
       crewStore.set({ ...crewStore.get(), [ME]: { lat, lng, accuracy: 8, at: Date.now() } });
       if (index >= path.length - 1) stopSimulation();
     }, 1000);
-    if (active && stage < 1) updateJob(active.id, 1, "On the way");
+    if (active && stage === STAGE.accepted) updateJob(active.id, STAGE.enRoute, "On the way");
+  }
+
+  function accept() {
+    if (!active) return;
+    setAnswerError("");
+    const problem = acceptJob(active.id, ME, notes.trim() || undefined);
+    setAnswerResult(problem ? { tone: "error", text: `Could not accept ${active.id}. ${problem}` } : null);
+    if (!problem) setNotes("");
+  }
+
+  function decline() {
+    if (!active) return;
+    if (!declineReason) {
+      setAnswerError("Choose a reason, so the control centre knows who to send instead.");
+      return;
+    }
+    setAnswerError("");
+    const id = active.id;
+    const problem = declineJob(id, ME, declineReason);
+    setAnswerResult(problem ? { tone: "error", text: `Could not decline ${id}. ${problem}` } : { tone: "done", text: `You declined ${id} (${declineReason.toLowerCase()}). It is back with the control centre, who will send another crew.` });
+    setDeclineReason("");
+    if (!problem) setNotes("");
   }
 
   /** Moves the job to `next`, sending the work notes with it. `ertMs` sets a new ERT for the phase it starts. */
@@ -301,6 +339,13 @@ function TechnicianDashboard() {
     <DashboardShell home="/dashboard/technician" user={me?.name ?? "Technician"} role={me?.title ?? "Field technician"}>
       <PageHeading eyebrow="Technician" title={heading.title} text={heading.text} action={<span className={`rounded-full px-3 py-2 text-xs font-extrabold ${simulating || usingSimulated ? "bg-warning-soft" : fix ? "bg-success-soft text-success" : "bg-warning-soft"}`}>{simulating ? "SIMULATED DRIVE" : usingSimulated ? "SIMULATED POSITION" : fix ? "GPS ACTIVE" : gpsError ? "GPS OFF" : "LOCATING…"}</span>} />
 
+      {answerResult && (
+        <div role={answerResult.tone === "error" ? "alert" : "status"} className={`mb-5 flex items-start justify-between gap-3 rounded-md border p-3 text-sm ${answerResult.tone === "error" ? "border-destructive bg-danger-soft" : "border-border bg-secondary"}`}>
+          <p>{answerResult.text}</p>
+          <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label="Dismiss" onClick={() => setAnswerResult(null)}><X /></Button>
+        </div>
+      )}
+
       {pendingHelp.length > 0 && (
         <div className="mb-5 space-y-3">
           {pendingHelp.map((request) => {
@@ -312,7 +357,7 @@ function TechnicianDashboard() {
 
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Shift summary">
         <Stat label="Jobs today" value={`${openJobs.length} open`} note={`${doneToday.length} completed today`} icon={ClipboardList} />
-        <Stat label="Current ETA" value={destination ? etaLabel : "—"} note={destination ? (route ? `${distanceLabel} by road${route.source === "estimate" ? " (estimate)" : ""}` : "Finding route…") : "No job assigned"} icon={Navigation} />
+        <Stat label="ETA" value={destination && route ? clockTime(now + route.minutes * 60000) : "—"} note={destination ? (route ? `${route.minutes} min · ${distanceLabel} by road${route.source === "estimate" ? " (estimate)" : ""}` : "Finding route…") : "No job assigned"} icon={Navigation} />
         <Stat label="Next status report" value={reportDue !== undefined ? clockTime(reportDue) : "—"} note={reportDue !== undefined ? `${dueLabel(reportDue, now)}${ert !== undefined ? ` · ERT ${clockTime(ert)}` : ""}` : activeDispatch ? "Job resolved" : "Standing by"} icon={Clock3} alert={reportLate} />
         <Stat label="Safety checks" value={active ? `${checked.length} / 4` : "—"} note={active ? "Complete before energising" : "No job assigned"} icon={HardHat} alert={Boolean(active) && checked.length < 4} />
       </section>
@@ -329,7 +374,7 @@ function TechnicianDashboard() {
                   <div className="flex flex-wrap gap-2">
                     {simulating
                       ? <Button size="sm" variant="outline" className="min-h-11" onClick={stopSimulation}><Square /> Stop simulation</Button>
-                      : <Button size="sm" variant="outline" className="min-h-11" disabled={!route || route.coords.length < 2} onClick={startSimulation}><Play /> {usingSimulated ? "Drive again (demo)" : "Simulate drive (demo)"}</Button>}
+                      : <Button size="sm" variant="outline" className="min-h-11" disabled={!route || route.coords.length < 2 || awaitingAnswer} title={awaitingAnswer ? "Accept the job first" : undefined} onClick={startSimulation}><Play /> {usingSimulated ? "Drive again (demo)" : "Simulate drive (demo)"}</Button>}
                     {usingSimulated && !simulating && <Button size="sm" variant="outline" className="min-h-11" onClick={useRealGps}><LocateFixed /> Use my real GPS</Button>}
                     <Button asChild size="sm" variant="outline" className="min-h-11"><a href={googleMaps} target="_blank" rel="noreferrer"><ExternalLink /> Google Maps</a></Button>
                     <Button asChild size="sm" variant="outline" className="min-h-11"><a href={waze} target="_blank" rel="noreferrer"><ExternalLink /> Waze</a></Button>
@@ -444,7 +489,20 @@ function TechnicianDashboard() {
               {noteError && <p role="alert" className="mt-2 text-xs font-bold text-destructive">{noteError}</p>}
               <Button variant="outline" className="mt-3 w-full" onClick={() => setPhoto(!photo)}><Camera />{photo ? "Photo attached" : "Add site photo"}</Button>
 
-              {stage === STAGE.assigned && <Button className="mt-3 w-full" onClick={() => moveTo(STAGE.accepted)}><ArrowRight /> Accept job</Button>}
+              {awaitingAnswer && (
+                <div className="mt-4 rounded-md border-2 border-primary bg-secondary p-3" aria-labelledby="answer-title">
+                  <p id="answer-title" className="flex items-center gap-2 text-sm font-extrabold text-navy"><BellRing className="size-4 text-primary" /> New job · accept or decline</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Assigned {ago(activeDispatch.at)}{ago(activeDispatch.at) === "Just now" ? "" : " ago"} by the control centre. Accept to start, or decline with a reason and it goes straight back to the dispatcher for another crew.</p>
+                  <Button className="mt-3 min-h-11 w-full" onClick={accept}><Check /> Accept job</Button>
+                  <label htmlFor="decline-reason" className="mt-3 block text-xs font-bold text-muted-foreground">Can't take it? Why not?</label>
+                  <select id="decline-reason" value={declineReason} aria-invalid={Boolean(answerError) && !declineReason} onChange={(event) => { setDeclineReason(event.target.value); setAnswerError(""); }} className="mt-1 h-11 w-full rounded-md border border-input bg-card px-3 text-sm">
+                    <option value="">Choose a reason…</option>
+                    {DECLINE_REASONS.map((reason) => <option key={reason}>{reason}</option>)}
+                  </select>
+                  <Button variant="outline" className="mt-2 min-h-11 w-full" onClick={decline}><X /> Decline job</Button>
+                </div>
+              )}
+              {answerError && <p role="alert" className="mt-2 text-xs font-bold text-destructive">{answerError}</p>}
               {stage === STAGE.accepted && <Button className="mt-3 w-full" onClick={() => moveTo(STAGE.enRoute, undefined, "On the way")}><ArrowRight /> I'm on my way</Button>}
               {stage === STAGE.onSite && (
                 <div className="mt-4 grid gap-3 rounded-md border border-border p-3">
@@ -467,7 +525,7 @@ function TechnicianDashboard() {
               {stage === STAGE.testing && <Button className="mt-3 w-full" disabled={awaitingResident} onClick={finishTesting}><CheckCircle2 /> {testingLabel}</Button>}
               {stage >= STAGE.resolved && <Button className="mt-3 w-full" disabled><CheckCircle2 /> Job resolved</Button>}
 
-              {stage < STAGE.resolved && !arrivalStep && (
+              {stage < STAGE.resolved && !arrivalStep && !awaitingAnswer && (
                 <Button variant={reportLate ? "default" : "outline"} className="mt-3 w-full" onClick={sendStatusReport}><MessageSquareText /> Send status report</Button>
               )}
               {(stage === STAGE.awaitingParts || stage === STAGE.repairing) && (

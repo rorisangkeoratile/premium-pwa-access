@@ -4,7 +4,7 @@ import { clockTime } from "@/lib/ert";
 import { HOME_AREA_KM, publicHistory, resolvedAt } from "@/lib/incidents";
 import { formatDuration } from "@/lib/metrics";
 import { areas, type AutoTicket } from "@/lib/nodes";
-import { STAGE, isHomeOutage, isResolved, stageNames, toIncident, type Dispatch, type OutageReport } from "@/lib/reports";
+import { STAGE, isHomeOutage, isResolved, stageNames, toIncident, type Dispatch, type JobDecline, type OutageReport } from "@/lib/reports";
 import { createStore } from "@/lib/store";
 import { declinedBy, helpersOf, type CrewRequest } from "@/lib/crew-requests";
 
@@ -27,7 +27,7 @@ export type Notice = {
   crewRequest?: string | undefined;
 };
 
-export type World = { reports: OutageReport[]; tickets: AutoTicket[]; dispatches: Record<string, Dispatch>; follows: Record<string, string[]>; crewRequests: Record<string, CrewRequest> };
+export type World = { reports: OutageReport[]; tickets: AutoTicket[]; dispatches: Record<string, Dispatch>; follows: Record<string, string[]>; crewRequests: Record<string, CrewRequest>; declines: Record<string, JobDecline[]> };
 
 /** When each user last marked their alerts as read, keyed by email. */
 export const noticeSeenStore = createStore<Record<string, number>>("lesedilink.notice-seen", {});
@@ -92,6 +92,8 @@ function residentNotices(user: MockUser, world: World): Notice[] {
     });
     if (own && incident.closedAt !== undefined && !incident.closed && incident.source === "citizen") {
       push("feedback", incident.closedAt + 1, { title: "How did we do?", body: "Your outage is resolved. Please rate the service on your dashboard. It helps the city serve you better.", tone: "info" });
+    } else if (!own && followed && incident.closedAt !== undefined) {
+      push("feedback", incident.closedAt + 1, { title: "How did we do?", body: `The outage you followed in ${area} is resolved. You can rate the service on your dashboard too.`, tone: "info" });
     }
     if (incident.source === "auto" && incident.closedAt !== undefined) {
       push("restored", incident.closedAt, { title: `Power restored in ${area}`, body: `Our sensors confirm the power is back on${atHome ? " at your home area" : ""}.`, tone: "success" });
@@ -134,7 +136,7 @@ function technicianNotices(user: MockUser, world: World): Notice[] {
     if (!info) continue;
     for (const update of dispatch.updates ?? []) {
       if (update.stage === STAGE.assigned && (update.actor === "control" || update.actor === undefined)) {
-        out.push({ id: `${id}:assigned:${update.at}`, at: update.at, title: `New job · ${info.place}`, body: `${info.priority} priority · ${info.detail}`, tone: "warn" });
+        out.push({ id: `${id}:assigned:${update.at}`, at: update.at, title: `New job · ${info.place}`, body: `${info.priority} priority · ${info.detail} · accept or decline it on your dashboard`, tone: "warn" });
       } else if (update.actor === "resident" && update.stage === STAGE.closed) {
         out.push({ id: `${id}:feedback:${update.at}`, at: update.at, title: "The resident gave feedback", body: `${info.place} · ${update.note ?? "Incident closed"}`, tone: "success" });
       } else if (update.actor === "resident" && update.stage === STAGE.onSite) {
@@ -198,6 +200,12 @@ function dispatcherNotices(world: World): Notice[] {
       if (update.flag) out.push({ id: `${id}:flag:${update.at}`, at: update.at, title: `Flag · ${update.flag}`, body: `${dispatch.tech} · ${info.place}`, tone: "danger" });
       else out.push({ id: `${id}:stage${update.stage}:${update.at}`, at: update.at, title, body: `${id} · ${info.place}${update.note && repeat ? ` · ${update.note}` : ""}`, tone: isResolved(update.stage) ? "success" : update.stage === STAGE.awaitingParts || (repeat && update.ertDue) ? "warn" : "info" });
     });
+  }
+  for (const [id, declines] of Object.entries(world.declines)) {
+    const place = describe(id, world)?.place ?? "Outage location";
+    for (const decline of declines) {
+      out.push({ id: `${id}:declined:${decline.tech}:${decline.at}`, at: decline.at, title: `${firstName(decline.tech)} declined ${id}`, body: `${decline.reason} · ${place} · back in the queue, assign another crew`, tone: "danger" });
+    }
   }
   out.push(...dispatcherCrewNotices(world));
   return out;

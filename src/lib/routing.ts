@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import { clockTime } from "@/lib/ert";
 import { distanceKm } from "@/lib/geo";
 
 /**
@@ -20,6 +21,13 @@ export type RouteInfo = {
   /** "osrm" for a real road route, "estimate" for a straight-line fallback when routing is unavailable. */
   source: "osrm" | "estimate";
 };
+
+/**
+ * ETA, estimated time of arrival: the clock time the driver should get there, with the drive time left,
+ * e.g. "14:32 · 12 min". Every dashboard shows arrival estimates this way, under the label "ETA".
+ * Not to be confused with the ERT (expected response time), the deadline the city has committed to.
+ */
+export const etaText = (route: RouteInfo | null, now = Date.now()) => (route ? `${clockTime(now + route.minutes * 60000)} · ${route.minutes} min` : "…");
 
 type OsrmStep = { distance: number; name: string; maneuver: { type: string; modifier?: string } };
 

@@ -37,7 +37,7 @@ export function NotificationBell({ user }: { user: MockUser }) {
   const wrapper = useRef<HTMLDivElement>(null);
   const known = useRef<Set<string> | null>(null);
 
-  const notices = useMemo(() => noticesFor(user, world), [user, world.reports, world.tickets, world.dispatches, world.follows, world.crewRequests]); // eslint-disable-line react-hooks/exhaustive-deps
+  const notices = useMemo(() => noticesFor(user, world), [user, world.reports, world.tickets, world.dispatches, world.follows, world.crewRequests, world.declines]); // eslint-disable-line react-hooks/exhaustive-deps
   const awaitingAnswer = useMemo(() => new Set(user.role === "Technician" ? pendingFor(user.name, world.crewRequests, world.dispatches).map((request) => request.id) : []), [user, world.crewRequests, world.dispatches]);
   const answer = (requestId: string, choice: "accepted" | "declined") => {
     if (!respondToCrew(requestId, user.name, choice)) toast.info("That request is no longer open", { description: "Someone else may have filled it, or it was cancelled." });

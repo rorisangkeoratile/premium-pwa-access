@@ -6,7 +6,10 @@ import { createStore } from "@/lib/store";
  * it is actually serving people, beside the response-time numbers it measures itself.
  */
 export type Feedback = {
-  /** The resident's own report. A merged report rates the incident it was merged into. */
+  /**
+   * The resident's own report (a merged report rates the incident it was merged into), or, for a resident
+   * who only followed the outage, `followerFeedbackId(incident, resident)`.
+   */
   reportId: string;
   incidentId: string;
   by: string;
@@ -16,14 +19,19 @@ export type Feedback = {
   keptInformed: boolean;
   tags: string[];
   comment?: string | undefined;
+  /** A neighbour who followed the outage rather than reporting it. */
+  follower?: boolean | undefined;
   at: number;
 };
 
 export const FEEDBACK_TAGS = ["Fixed quickly", "Kept me updated", "Friendly crew", "Took too long", "Times given were not met", "Problem came back"] as const;
 export const RATING_WORDS = ["", "Very poor", "Poor", "Okay", "Good", "Excellent"] as const;
 
-/** Feedback per report id: one per resident report. */
+/** Feedback per report id: one per resident report, and one per follower of an incident. */
 export const feedbackStore = createStore<Record<string, Feedback>>("lesedilink.feedback", {});
+
+/** Where a follower's feedback is kept: one per resident per incident they followed. */
+export const followerFeedbackId = (incidentId: string, resident: string) => `${incidentId}:follower:${resident}`;
 
 /**
  * Saves the resident's feedback. When it comes from the person who opened the incident, and the repair is

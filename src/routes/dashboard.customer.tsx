@@ -7,15 +7,15 @@ import { Input } from "@/components/ui/input";
 import { DashboardShell, Field, PageHeading, Stat } from "@/components/lesedi/shell";
 import { LiveMap } from "@/components/lesedi/live-map";
 import { IncidentTracker } from "@/components/lesedi/incident-tracker";
-import { FeedbackCard } from "@/components/lesedi/feedback-card";
-import { feedbackStore } from "@/lib/feedback";
+import { FeedbackCard, type FeedbackSubject } from "@/components/lesedi/feedback-card";
+import { feedbackStore, followerFeedbackId } from "@/lib/feedback";
 import { ResidentVisitCards } from "@/components/lesedi/visit-pin";
 import { currentUser, type MockUser } from "@/lib/auth";
 import { detectPosition, distanceKm, reverseGeocode } from "@/lib/geo";
 import { MAX_PHOTOS, MAX_VIDEO_MB, compressPhoto } from "@/lib/media";
 import { REPORT_RADIUS_KM, findDuplicate, nearbyTicket, type DuplicateMatch } from "@/lib/dedup";
 import { areas, ticketStore } from "@/lib/nodes";
-import { HOME_AREA_KM, NEARBY_KM, follow, followStore, isFollowing, nearbyIncidents, progressSteps, publicHistory, publicIncidents, unfollow } from "@/lib/incidents";
+import { HOME_AREA_KM, NEARBY_KM, follow, followStore, isFollowing, nearbyIncidents, progressSteps, publicHistory, publicIncidents, unfollow, type PublicIncident } from "@/lib/incidents";
 import { formatDuration, nearestArea } from "@/lib/metrics";
 import { HOME_OUTAGE, OTHER_COMPLAINT, OTHER_NOTE_MAX, addReport, ago, complaintsByType, dispatchStore, isHomeOutage, isResolved, nextReportId, profileStore, reportStore, setReportVideo, type OutageReport, type OutageType } from "@/lib/reports";
 
@@ -98,6 +98,8 @@ function CustomerDashboard() {
   const [areaPoint, setAreaPoint] = useState<{ lat: number; lng: number } | null>(null);
   const [areaChecking, setAreaChecking] = useState(false);
   const [areaError, setAreaError] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  useEffect(() => setSubmitError(""), [pin, outageType, complaint]);
 
   // Best-effort: turn the pin into a street address. It is only used while it still belongs to the current pin.
   useEffect(() => {
@@ -187,6 +189,12 @@ function CustomerDashboard() {
     // Deduplication: the same complaint within 1 km of an open report joins that incident instead of opening a new one.
     // A home outage is never merged: it is a fault at one property, not a shared one.
     const duplicate = findDuplicate(pin, reports, tickets, dispatches, outageType, complaint);
+    // Checked again on send: another resident may have reported the same problem since the form was opened.
+    if (duplicate && isBlocked(duplicate)) {
+      setSubmitError(alreadyReported(duplicate));
+      return;
+    }
+    setSubmitError("");
     const meter = outageType === HOME_OUTAGE ? account.replace(/\s/g, "") : "";
     const report: OutageReport = {
       id: nextReportId(),
@@ -232,17 +240,32 @@ function CustomerDashboard() {
   const publicList = useMemo(() => publicIncidents(reports, tickets, dispatches, follows), [reports, tickets, dispatches, follows]);
 
   const mine = me ? reports.filter((report) => report.reporter === me.name) : [];
-  const latest = mine[0];
+  // The timeline keeps showing a finished outage as "Restored"; the live tracker above is for open ones only.
+  const myHistory = useMemo(() => publicHistory(reports, tickets, dispatches, follows), [reports, tickets, dispatches, follows]);
+  const incidentOf = (report: OutageReport) => myHistory.find((incident) => incident.id === (report.duplicateOf ?? report.id));
+  // A report is finished once its outage is closed, or resolved and the resident has rated it. It then leaves
+  // the dashboard (it stays in "My report history"), and the newest report still in progress takes its place.
+  const isDone = (report: OutageReport) => {
+    const incident = incidentOf(report);
+    return incident?.closedAt !== undefined && (incident.closed || Boolean(feedback[report.id]));
+  };
+  const latest = mine.find((report) => !isDone(report));
   const openMine = mine.filter((report) => !isResolved(dispatches[report.duplicateOf ?? report.id]?.stage));
   const masterId = latest ? (latest.duplicateOf ?? latest.id) : undefined;
   const myIncident = publicList.find((incident) => incident.id === masterId);
-  // The timeline keeps showing a finished outage as "Restored"; the live tracker above is for open ones only.
-  const myHistory = useMemo(() => publicHistory(reports, tickets, dispatches, follows), [reports, tickets, dispatches, follows]);
   const myLatestIncident = myHistory.find((incident) => incident.id === masterId);
-  // Every one of the resident's reports whose outage is resolved and that they have not rated yet.
-  const toRate = mine
-    .map((report) => ({ report, incident: myHistory.find((incident) => incident.id === (report.duplicateOf ?? report.id)) }))
-    .filter(({ report, incident }) => incident?.closedAt !== undefined && !feedback[report.id] && !later.includes(report.id));
+  // Feedback still to give: every one of the resident's reports whose outage is resolved, and every resolved
+  // outage they followed without reporting it. A neighbour who followed was affected too, so they can rate it.
+  const ownMasters = new Set(mine.map((report) => report.duplicateOf ?? report.id));
+  const toRate: { subject: FeedbackSubject; incident: PublicIncident; since: number }[] = [
+    ...mine.flatMap((report) => {
+      const incident = incidentOf(report);
+      return incident?.closedAt !== undefined ? [{ subject: { id: report.id, incidentId: incident.id, by: report.reporter, opener: !report.duplicateOf, follower: false }, incident, since: report.createdAt }] : [];
+    }),
+    ...myHistory
+      .filter((incident) => incident.closedAt !== undefined && !ownMasters.has(incident.id) && isFollowing(incident.id, resident, follows))
+      .map((incident) => ({ subject: { id: followerFeedbackId(incident.id, resident), incidentId: incident.id, by: me?.name ?? "Resident", opener: false, follower: true }, incident, since: incident.openedAt })),
+  ].filter(({ subject }) => !feedback[subject.id] && !later.includes(subject.id));
   // The exact location is shown only to the person who filed that report; a merged report follows
   // someone else's incident, so it gets the same area-level view as any other follower.
   const ownPoint = latest && !latest.duplicateOf ? { lat: latest.lat, lng: latest.lng } : undefined;
@@ -263,6 +286,16 @@ function CustomerDashboard() {
   const matchIncident = match ? publicList.find((incident) => incident.id === match.id) : undefined;
   const ownMatch = match ? mine.some((report) => report.id === match.id || report.duplicateOf === match.id) : false;
   const followingMatch = match ? isFollowing(match.id, resident, follows) : false;
+  // The exact same complaint is already reported here (or this resident already reported this fault), so a
+  // second report would add nothing. Sending is switched off; following the outage gives the same updates.
+  // A complaint worded differently for the same fault is still sent, and merged, because it adds detail.
+  const reportedByMe = (found: DuplicateMatch) => mine.some((report) => report.id === found.id || report.duplicateOf === found.id);
+  const isBlocked = (found: DuplicateMatch) => reportedByMe(found) || (found.kind === "report" && found.complaint === complaint);
+  const alreadyReported = (found: DuplicateMatch) =>
+    reportedByMe(found)
+      ? "You already reported this fault. Follow its progress at the top of this page."
+      : `“${found.complaint ?? complaint}” is already reported here, so it cannot be sent again. Follow the outage above to get the same updates.`;
+  const blocked = match ? isBlocked(match) : false;
   const related = useMemo(() => (pin ? nearbyTicket(pin, tickets) : undefined), [pin, tickets]);
 
   async function checkArea() {
@@ -293,8 +326,8 @@ function CustomerDashboard() {
         return dispatch ? <ResidentVisitCards key={report.id} report={report} dispatch={dispatch} /> : null;
       })}
 
-      {toRate.map(({ report, incident }) => (
-        <FeedbackCard key={report.id} report={report} area={incident?.area ?? "your area"} resolvedIn={incident?.closedAt !== undefined ? incident.closedAt - report.createdAt : undefined} onLater={() => setLater((current) => [...current, report.id])} />
+      {toRate.map(({ subject, incident, since }) => (
+        <FeedbackCard key={subject.id} subject={subject} area={incident.area} resolvedIn={incident.closedAt !== undefined ? incident.closedAt - since : undefined} onLater={() => setLater((current) => [...current, subject.id])} />
       ))}
 
       {home && (
@@ -446,7 +479,7 @@ function CustomerDashboard() {
                 {!ownMatch && (
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <Button type="button" className="min-h-11" variant={followingMatch ? "outline" : "default"} onClick={() => (followingMatch ? unfollow(match.id, resident) : follow(match.id, resident))}>{followingMatch ? <><BellOff /> Stop following</> : <><Bell /> Follow this outage</>}</Button>
-                    <p className="min-w-0 flex-1 text-xs text-muted-foreground">Only your own home? Choose “Just my home” above to report it separately. Sending a report here adds yours to this outage.</p>
+                    <p className="min-w-0 flex-1 text-xs text-muted-foreground">Only your own home? Choose “Just my home” above to report it separately.{blocked ? " The same problem is already reported, so sending it again is switched off." : " Sending a report here adds yours to this outage."}</p>
                   </div>
                 )}
               </div>
@@ -525,8 +558,9 @@ function CustomerDashboard() {
 
             <div className="mt-5 flex flex-col gap-2 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs text-muted-foreground sm:max-w-sm">You agreed to be contacted about your reports when you signed up. If your connection drops, your report is saved and sent automatically.</p>
-              <Button className="min-h-12 w-full text-base sm:w-auto sm:min-w-64" type="submit"><Zap /> Send outage report</Button>
+              <Button className="min-h-12 w-full text-base sm:w-auto sm:min-w-64" type="submit" disabled={blocked} aria-describedby={blocked || submitError ? "send-blocked" : undefined}><Zap /> Send outage report</Button>
             </div>
+            {(blocked || submitError) && <p id="send-blocked" role="alert" className="mt-2 text-xs font-bold text-destructive sm:text-right">{blocked && match ? alreadyReported(match) : submitError}</p>}
           </form>
         )}
       </div>

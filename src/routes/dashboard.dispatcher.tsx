@@ -11,7 +11,7 @@ import { mockUsers, technicians, type MockUser, type Priority } from "@/componen
 import { currentUser } from "@/lib/auth";
 import { distanceKm } from "@/lib/geo";
 import { JobFeed, LinkedReports } from "@/components/lesedi/job-progress";
-import { STAGE, assignJob, complaintText, crewStore, dispatchStore, isResolved, reportStore, stageNames, toIncident } from "@/lib/reports";
+import { STAGE, ago, assignJob, complaintText, crewStore, declineStore, dispatchStore, isResolved, reportStore, stageNames, toIncident } from "@/lib/reports";
 import { TICKET_RADIUS_KM, nearbyTicket } from "@/lib/dedup";
 import { closeIncident, feedbackStore } from "@/lib/feedback";
 import { crewStatus, formatDuration, incidentRows, summarise } from "@/lib/metrics";
@@ -53,6 +53,7 @@ function DispatcherDashboard() {
   const follows = followStore.use();
   const feedback = feedbackStore.use();
   const crewRequests = crewRequestStore.use();
+  const declines = declineStore.use();
   const presence = usePresence();
   const now = useClock(3000);
   const online = useMemo(() => onlineEmails(presence, now), [presence, now]);
@@ -81,6 +82,7 @@ function DispatcherDashboard() {
   const relatedReports = selectedTicket ? reports.filter((item) => !item.duplicateOf && !isResolved(dispatches[item.id]?.stage) && distanceKm(item, selectedTicket) <= TICKET_RADIUS_KM) : [];
   const relatedCrew = relatedTicket ? dispatches[relatedTicket.id]?.tech : undefined;
   const dispatched = selected ? dispatches[selected.id] : undefined;
+  const selectedDeclines = selected ? (declines[selected.id] ?? []) : [];
   const selectedOpenedAt = entries.find((entry) => entry.incident.id === selected?.id)?.openedAt ?? Date.now();
 
   const crew = useMemo(
@@ -150,8 +152,9 @@ function DispatcherDashboard() {
                 <div className="flex items-center justify-between gap-2"><PriorityBadge value={incident.priority} /><span className="text-[11px] font-bold text-muted-foreground">{incident.age}</span></div>
                 <p className="mt-2 font-extrabold text-navy">{incident.place}</p>
                 <p className="text-xs text-muted-foreground">{incident.detail}</p>
-                {(pastErt || reportLate || row?.stage === STAGE.awaitingParts) && (
+                {(pastErt || reportLate || row?.stage === STAGE.awaitingParts || (!dispatches[incident.id] && declines[incident.id])) && (
                   <div className="mt-2 flex flex-wrap gap-1 text-[10px] font-extrabold uppercase">
+                    {!dispatches[incident.id] && declines[incident.id] && <span className="rounded bg-danger-soft px-1.5 py-0.5 text-destructive">Declined by {declines[incident.id]!.at(-1)!.tech.split(" ")[0]} · reassign</span>}
                     {row?.stage === STAGE.awaitingParts && <span className="rounded bg-warning-soft px-1.5 py-0.5">Awaiting parts</span>}
                     {pastErt && <span className="rounded bg-danger-soft px-1.5 py-0.5 text-destructive">ERT passed</span>}
                     {reportLate && <span className="rounded bg-danger-soft px-1.5 py-0.5 text-destructive">Status report overdue</span>}
@@ -194,6 +197,14 @@ function DispatcherDashboard() {
                   </ul>
                 </div>
               )}
+              {selectedDeclines.length > 0 && (
+                <div className={`mt-4 rounded-md border p-3 text-xs ${dispatched ? "border-border" : "border-destructive bg-danger-soft"}`} role="status">
+                  <p className="font-bold">{dispatched ? "Declined earlier" : "Declined · assign another crew"}</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {selectedDeclines.map((decline) => <li key={`${decline.tech}-${decline.at}`}>{decline.tech} · {decline.reason} · {ago(decline.at)}{ago(decline.at) === "Just now" ? "" : " ago"}</li>)}
+                  </ul>
+                </div>
+              )}
               {dispatched && <div className="mt-4"><JobFeed dispatch={dispatched} openedAt={selectedOpenedAt} crew={selected ? openRequestFor(selected.id, crewRequests, dispatches) : undefined} /></div>}
               <div className="mt-4 grid max-h-72 gap-2 overflow-y-auto sm:grid-cols-2 xl:grid-cols-3">
                 {crew.map(({ tech, status, job, online: isOnline }) => (
@@ -201,6 +212,7 @@ function DispatcherDashboard() {
                     <div className="flex items-center gap-2"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-[10px] font-extrabold text-primary">{tech.initials}</span><span className="min-w-0 truncate text-xs font-extrabold">{tech.name}</span><span title={isOnline ? "Online" : "Offline"} className={`ml-auto size-2.5 shrink-0 rounded-full ${isOnline ? "bg-success" : "bg-muted-foreground/40"}`} /></div>
                     <p className="mt-2 text-[11px] text-muted-foreground">{tech.skill} · {crewDistance(tech)}</p>
                     <p className="text-[11px] text-muted-foreground">{status === "On job" ? `On job · ${job?.id ?? ""}` : isOnline ? "Available · online" : "Available · offline"}</p>
+                    {selectedDeclines.some((decline) => decline.tech === tech.name) && <p className="text-[11px] font-bold text-destructive">Declined this job</p>}
                   </button>
                 ))}
               </div>

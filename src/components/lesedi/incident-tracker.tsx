@@ -3,7 +3,7 @@ import { BellOff, MapPin, Radio, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LiveMap, type MapMarker } from "@/components/lesedi/live-map";
 import { technicians } from "@/components/lesedi/data";
-import { useRoute } from "@/lib/routing";
+import { etaText, useRoute } from "@/lib/routing";
 import { clockTime, dueLabel } from "@/lib/ert";
 import { useClock } from "@/lib/presence";
 import { STAGE, ago, crewStore } from "@/lib/reports";
@@ -29,9 +29,9 @@ export function IncidentTracker({ incident, own = false, point, onUnfollow, labe
 
   const markers: MapMarker[] = [];
   if (own && point) markers.push({ id: "site", lat: point.lat, lng: point.lng, kind: "incident", label: "Your outage", detail: "Where your technician is heading" });
-  if (showCrew && crew) markers.push({ id: "crew", lat: crew.lat, lng: crew.lng, kind: "crew", label: incident.techFirst ?? "Technician", detail: driving ? (route ? `About ${route.minutes} min away` : "On the way") : incident.stage >= 2 ? "On site now" : "Getting ready" });
+  if (showCrew && crew) markers.push({ id: "crew", lat: crew.lat, lng: crew.lng, kind: "crew", label: incident.techFirst ?? "Technician", detail: driving ? (route ? `ETA ${etaText(route, now)}` : "On the way") : incident.stage >= 2 ? "On site now" : "Getting ready" });
 
-  const arrival = incident.stage >= 2 ? "On site" : driving ? (route ? `${route.minutes} min` : "…") : "To be confirmed";
+  const eta = incident.stage >= 2 ? "On site" : driving ? etaText(route, now) : "To be confirmed";
 
   return (
     <section className="rounded-md border border-border bg-card" aria-labelledby={`track-${incident.id}`}>
@@ -50,7 +50,7 @@ export function IncidentTracker({ incident, own = false, point, onUnfollow, labe
       <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,.8fr)]">
         <LiveMap
           title={driving ? "TECHNICIAN ON THE WAY" : showCrew ? "TECHNICIAN LIVE" : "AFFECTED AREA"}
-          subtitle={driving ? (route ? `${incident.techFirst} is about ${route.minutes} min away` : "Finding the route…") : showCrew ? `${incident.techFirst}'s live position${incident.stage >= 2 ? " · on site now" : ""}` : own ? incident.status : "Approximate area · exact addresses are not shown"}
+          subtitle={driving ? (route ? `${incident.techFirst} is on the way · ETA ${etaText(route, now)}` : "Finding the route…") : showCrew ? `${incident.techFirst}'s live position${incident.stage >= 2 ? " · on site now" : ""}` : own ? incident.status : "Approximate area · exact addresses are not shown"}
           markers={markers}
           route={driving ? (route?.coords ?? null) : null}
           fitKey={`${showCrew ? "crew" : "none"}-${driving && route ? "route" : "noroute"}`}
@@ -59,7 +59,7 @@ export function IncidentTracker({ incident, own = false, point, onUnfollow, labe
         />
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-md bg-secondary p-3"><p className="text-[10px] font-extrabold uppercase text-muted-foreground">Arrival</p><p className="mt-1 text-xl font-extrabold text-navy">{arrival}</p></div>
+            <div className="rounded-md bg-secondary p-3"><p className="text-[10px] font-extrabold uppercase text-muted-foreground">Technician ETA</p><p className="mt-1 text-xl font-extrabold text-navy">{eta}</p></div>
             <div className="rounded-md bg-secondary p-3"><p className="text-[10px] font-extrabold uppercase text-muted-foreground">Technician</p><p className="mt-1 text-xl font-extrabold text-navy">{incident.techFirst ?? "Pending"}</p></div>
           </div>
           {incident.ertDue !== undefined && (

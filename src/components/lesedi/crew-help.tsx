@@ -8,13 +8,13 @@ import { CREW_REASONS, MAX_CREW, cancelCrewRequest, crewArrived, crewPosition, d
 import { clockTime } from "@/lib/ert";
 import type { GeoFix } from "@/lib/geo";
 import { ago, type CrewLocation } from "@/lib/reports";
-import { useRoute, type LatLng, type RouteInfo } from "@/lib/routing";
+import { etaText, useRoute, type LatLng, type RouteInfo } from "@/lib/routing";
 import { arrivalProblem, checkArrival, formatDistance } from "@/lib/visit";
 
 const first = (name: string) => name.split(" ")[0] ?? name;
 const phoneOf = (name: string) => mockUsers.find((user) => user.name === name)?.phone;
 
-const etaText = (route: RouteInfo | null) => (route ? `${route.minutes} min · ${route.distanceKm.toFixed(1)} km${route.source === "estimate" ? " (estimate)" : ""}` : "Working out the route…");
+const distanceText = (route: RouteInfo | null) => (route ? `${route.distanceKm.toFixed(1)} km by road${route.source === "estimate" ? " (estimate)" : ""}` : "Working out the route…");
 
 /** The ask, on a fellow technician's dashboard: where, why, how far away they are, and Accept or Decline. */
 export function HelpRequestCard({ request, me, from, target, busyWith }: { request: CrewRequest; me: string; from: LatLng; target: Incident; busyWith?: string | undefined }) {
@@ -38,8 +38,9 @@ export function HelpRequestCard({ request, me, from, target, busyWith }: { reque
       </div>
       <p className="mt-3 text-sm font-bold">{target.place}</p>
       <p className="text-xs text-muted-foreground">{target.detail} · {request.jobId}</p>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <Info label="Your ETA" value={etaText(route)} />
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <Info label="ETA" value={etaText(route)} />
+        <Info label="Distance" value={distanceText(route)} />
         <Info label="Accepted so far" value={`${joined} of ${request.needed}`} />
       </div>
       {busyWith && <p className="mt-3 rounded-md bg-warning-soft p-2 text-xs">You are on job {busyWith}. If you accept, the control centre sees that you went to help.</p>}
@@ -61,7 +62,7 @@ function HelperRow({ name, arrivedAt, from, target }: { name: string; arrivedAt?
   return (
     <li className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-card p-2 text-xs">
       <span className="min-w-0">
-        <strong>{name}</strong> · {arrivedAt ? `on site since ${clockTime(arrivedAt)}` : route ? `on the way · about ${route.minutes} min (${route.distanceKm.toFixed(1)} km)` : "on the way"}
+        <strong>{name}</strong> · {arrivedAt ? `on site since ${clockTime(arrivedAt)}` : route ? `on the way · ETA ${etaText(route)} (${route.distanceKm.toFixed(1)} km)` : "on the way"}
       </span>
       {phone && <a className="inline-flex min-h-8 items-center gap-1 font-bold text-primary underline" href={`tel:${phone.replace(/\s/g, "")}`}><Phone className="size-3.5" /> {phone}</a>}
     </li>
@@ -138,7 +139,7 @@ export function SupportPanel({ request, me, target, route, getPosition, radiusM 
       <h2 id={`support-${request.id}`} className="mt-1 text-lg font-extrabold text-navy">Helping {request.by}</h2>
       <p className="text-sm text-muted-foreground">{target.place} · {request.reason}</p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <Info label="ETA" value={mine?.arrivedAt ? "On site" : route ? `${route.minutes} min` : "…"} />
+        <Info label="ETA" value={mine?.arrivedAt ? "On site" : etaText(route)} />
         <Info label="Distance" value={mine?.arrivedAt ? (mine.distanceM !== undefined && mine.distanceM >= 0 ? `Arrived · ${formatDistance(mine.distanceM)} from the site` : "Arrived") : route ? `${route.distanceKm.toFixed(1)} km by road` : "…"} />
       </div>
       {phone && <a className="mt-3 inline-flex min-h-11 items-center gap-2 text-sm font-bold text-primary underline" href={`tel:${phone.replace(/\s/g, "")}`}><Phone className="size-4" /> Call {first(request.by)} · {phone}</a>}

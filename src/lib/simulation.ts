@@ -3,7 +3,7 @@ import { feedbackStore } from "@/lib/feedback";
 import { followStore } from "@/lib/incidents";
 import { controlStore, cutPower, resetEngine, statusStore, ticketStore } from "@/lib/nodes";
 import { noticeSeenStore } from "@/lib/notifications";
-import { crewStore, dispatchStore, reportStore } from "@/lib/reports";
+import { crewStore, declineStore, dispatchStore, reportStore } from "@/lib/reports";
 
 /**
  * Wipes everything the simulation produced (reports, jobs, feedback, sensor tickets, follows, crew positions, crew requests and alert
@@ -13,6 +13,7 @@ import { crewStore, dispatchStore, reportStore } from "@/lib/reports";
 export function resetSimulation() {
   reportStore.reset();
   dispatchStore.reset();
+  declineStore.reset();
   crewStore.reset();
   crewRequestStore.reset();
   followStore.reset();
