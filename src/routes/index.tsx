@@ -128,15 +128,15 @@ function LandingPage() {
     <div className="min-h-dvh bg-background">
       <header className="sticky top-0 z-40 border-b border-border bg-card/90 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <Logo />
             <p className="text-lg font-extrabold text-navy">Lesedi<span className="text-primary">Link</span></p>
           </div>
-          <nav className="flex items-center gap-2">
+          <nav className="flex shrink-0 items-center gap-1 sm:gap-2">
             <ThemeToggle />
             <Link to="/login" className="flex min-h-11 items-center px-3 text-sm font-bold text-muted-foreground hover:text-foreground">Login</Link>
             <Link to="/signup" className="hidden min-h-11 items-center px-3 text-sm font-bold text-primary hover:underline sm:flex">Sign up</Link>
-            <Button asChild className="min-h-11"><Link to="/login">Report an outage</Link></Button>
+            <Button asChild className="hidden min-h-11 sm:inline-flex"><Link to="/login">Report an outage</Link></Button>
           </nav>
         </div>
       </header>
@@ -213,7 +213,7 @@ function LandingPage() {
 
       <footer className="bg-brand-gradient text-primary-foreground">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-8 gap-y-4 px-4 py-8">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <Logo />
             <div><p className="font-extrabold">LesediLink · City of Tshwane</p><p className="text-xs text-primary-foreground/75">Municipal electricity response</p></div>
           </div>

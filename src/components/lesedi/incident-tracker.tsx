@@ -47,7 +47,7 @@ export function IncidentTracker({ incident, own = false, point, onUnfollow, labe
         </div>
       </div>
 
-      <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,.8fr)]">
+      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,.8fr)]">
         <LiveMap
           title={driving ? "TECHNICIAN ON THE WAY" : showCrew ? "TECHNICIAN LIVE" : "AFFECTED AREA"}
           subtitle={driving ? (route ? `${incident.techFirst} is on the way · ETA ${etaText(route, now)}` : "Finding the route…") : showCrew ? `${incident.techFirst}'s live position${incident.stage >= 2 ? " · on site now" : ""}` : own ? incident.status : "Approximate area · exact addresses are not shown"}

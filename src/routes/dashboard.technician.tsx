@@ -355,14 +355,14 @@ function TechnicianDashboard() {
         </div>
       )}
 
-      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Shift summary">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Shift summary">
         <Stat label="Jobs today" value={`${openJobs.length} open`} note={`${doneToday.length} completed today`} icon={ClipboardList} />
         <Stat label="ETA" value={destination && route ? clockTime(now + route.minutes * 60000) : "—"} note={destination ? (route ? `${route.minutes} min · ${distanceLabel} by road${route.source === "estimate" ? " (estimate)" : ""}` : "Finding route…") : "No job assigned"} icon={Navigation} />
         <Stat label="Next status report" value={reportDue !== undefined ? clockTime(reportDue) : "—"} note={reportDue !== undefined ? `${dueLabel(reportDue, now)}${ert !== undefined ? ` · ERT ${clockTime(ert)}` : ""}` : activeDispatch ? "Job resolved" : "Standing by"} icon={Clock3} alert={reportLate} />
         <Stat label="Safety checks" value={active ? `${checked.length} / 4` : "—"} note={active ? "Complete before energising" : "No job assigned"} icon={HardHat} alert={Boolean(active) && checked.length < 4} />
       </section>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_.7fr]">
+      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,.7fr)]">
         <section className="space-y-5">
           <LiveMap markers={markers} route={route?.coords ?? null} heightClass="h-80" title={active ? "MY LIVE ROUTE MAP" : support ? "ROUTE TO HELP A COLLEAGUE" : "OPEN OUTAGES"} fitKey={focusId} subtitle={simulating ? "Simulated drive along the road route · the resident is watching this move" : usingSimulated ? "Using the simulated position · the resident sees you here" : fix ? "Your GPS position is shared with the control centre and customer" : gpsError ?? "Waiting for GPS…"} />
 

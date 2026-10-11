@@ -6,10 +6,12 @@ export type { MockUser, Role };
 const SESSION_KEY = "lesedilink.session";
 const PENDING_KEY = "lesedilink.pending-otp";
 
-/** Set to false to hide (and disable) the one-tap logins on the login page. Every one-tap login still needs the OTP. */
+/** Set to false to hide (and disable) the one-tap logins on the login page. */
 export const QUICK_LOGIN_ENABLED = true;
 
 /**
+ * Log-in is email and password only. The one-time PIN is used just once, at sign-up, to confirm the cell number.
+ *
  * Demo only. This prototype has no SMS gateway, so when true the one-time PIN is shown on screen in a
  * "demo phone" box instead of being texted. Set to false before real users see the app, then send the
  * code from your server in `deliverOtp`.
@@ -26,7 +28,7 @@ export const accountStore = createStore<MockUser[]>("lesedilink.accounts", []);
 const credentialStore = createStore<Record<string, { salt: string; hash: string }>>("lesedilink.credentials", {});
 
 type SignupPayload = { user: MockUser; salt: string; hash: string };
-type PendingOtp = { purpose: "login" | "signup"; email: string; code: string; issuedAt: number; expiresAt: number; attempts: number; signup?: SignupPayload };
+type PendingOtp = { purpose: "signup"; email: string; code: string; issuedAt: number; expiresAt: number; attempts: number; signup?: SignupPayload };
 
 const read = <T>(key: string): T | null => {
   try {
@@ -93,31 +95,37 @@ function deliverOtp(_user: MockUser, _code: string) {
 
 export const maskPhone = (phone: string) => `${phone.slice(0, 3)} ••• ${phone.slice(-4)}`;
 
-function issue(user: MockUser, purpose: PendingOtp["purpose"], signup?: SignupPayload) {
+function issue(user: MockUser, signup: SignupPayload) {
   const now = Date.now();
-  const pending: PendingOtp = { purpose, email: user.email, code: newCode(), issuedAt: now, expiresAt: now + OTP_TTL_MS, attempts: 0, ...(signup ? { signup } : {}) };
+  const pending: PendingOtp = { purpose: "signup", email: user.email, code: newCode(), issuedAt: now, expiresAt: now + OTP_TTL_MS, attempts: 0, signup };
   write(PENDING_KEY, pending);
   deliverOtp(user, pending.code);
   return user;
 }
 
-/** Step 1: check the password, then send a one-time PIN. No session exists until the PIN is verified. */
-export async function startLogin(email: string, password: string): Promise<MockUser | null> {
+function signIn(user: MockUser) {
+  remove(PENDING_KEY);
+  write(SESSION_KEY, user.email);
+  return user;
+}
+
+/** Checks the password and, if it matches, starts the session straight away. */
+export async function logIn(email: string, password: string): Promise<MockUser | null> {
   const address = email.trim().toLowerCase();
   const seeded = mockUsers.find((item) => item.email === address && item.password === password);
-  if (seeded) return issue(seeded, "login");
+  if (seeded) return signIn(seeded);
 
   const user = accountStore.get().find((item) => item.email === address);
   const credential = credentialStore.get()[address];
-  if (user && credential && (await hashPassword(password, credential.salt)) === credential.hash) return issue(user, "login");
+  if (user && credential && (await hashPassword(password, credential.salt)) === credential.hash) return signIn(user);
   return null;
 }
 
-/** Demo shortcut: skips the password only. The one-time PIN is still required. */
-export function startQuickLogin(email: string): MockUser | null {
+/** Demo shortcut: signs in as a seeded account without a password. */
+export function quickLogIn(email: string): MockUser | null {
   if (!QUICK_LOGIN_ENABLED) return null;
   const user = mockUsers.find((item) => item.email === email);
-  return user ? issue(user, "login") : null;
+  return user ? signIn(user) : null;
 }
 
 export type NewCustomer = { name: string; email: string; phone: string; password: string; area: string; areaId?: string | undefined };
@@ -140,7 +148,7 @@ export async function startSignup(details: NewCustomer): Promise<{ ok: true; use
     ...(details.areaId ? { areaId: details.areaId } : {}),
   };
   const hash = await hashPassword(details.password, salt);
-  issue(user, "signup", { user, salt, hash });
+  issue(user, { user, salt, hash });
   return { ok: true, user };
 }
 
@@ -160,7 +168,7 @@ export function resendOtp(): MockUser | null {
   const pending = read<PendingOtp>(PENDING_KEY);
   const waiting = pendingLogin();
   if (!pending || !waiting || Date.now() - waiting.issuedAt < OTP_RESEND_MS) return null;
-  return issue(waiting.user, pending.purpose, pending.signup);
+  return pending.signup ? issue(waiting.user, pending.signup) : null;
 }
 
 export function cancelLogin() {
@@ -169,7 +177,7 @@ export function cancelLogin() {
 
 export type OtpResult = { status: "ok"; user: MockUser } | { status: "wrong"; attemptsLeft: number } | { status: "expired" } | { status: "locked" };
 
-/** Step 2: check the PIN. Three wrong tries or five minutes and the PIN is destroyed. A correct PIN for a sign-up creates the account. */
+/** Sign-up, step 2: check the PIN. Three wrong tries or five minutes and the PIN is destroyed. A correct PIN creates the account. */
 export function verifyOtp(code: string): OtpResult {
   const pending = read<PendingOtp>(PENDING_KEY);
   const user = pending ? (pending.signup?.user ?? findUser(pending.email)) : null;
@@ -187,17 +195,13 @@ export function verifyOtp(code: string): OtpResult {
     write(PENDING_KEY, { ...pending, attempts });
     return { status: "wrong", attemptsLeft: OTP_MAX_ATTEMPTS - attempts };
   }
-  if (pending.signup) {
-    if (emailTaken(user.email)) {
-      remove(PENDING_KEY);
-      return { status: "expired" };
-    }
-    accountStore.set([...accountStore.get(), pending.signup.user]);
-    credentialStore.set({ ...credentialStore.get(), [user.email]: { salt: pending.signup.salt, hash: pending.signup.hash } });
+  if (!pending.signup || emailTaken(user.email)) {
+    remove(PENDING_KEY);
+    return { status: "expired" };
   }
-  remove(PENDING_KEY);
-  write(SESSION_KEY, user.email);
-  return { status: "ok", user };
+  accountStore.set([...accountStore.get(), pending.signup.user]);
+  credentialStore.set({ ...credentialStore.get(), [user.email]: { salt: pending.signup.salt, hash: pending.signup.hash } });
+  return { status: "ok", user: signIn(user) };
 }
 
 export function currentUser(): MockUser | null {

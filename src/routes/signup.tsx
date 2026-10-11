@@ -108,13 +108,13 @@ function SignupPage() {
     <div className="min-h-dvh bg-background">
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4">
-          <Link to="/" className="flex items-center gap-3" aria-label="LesediLink home">
+          <Link to="/" className="flex min-w-0 items-center gap-3" aria-label="LesediLink home">
             <Logo />
             <p className="text-lg font-extrabold text-navy">Lesedi<span className="text-primary">Link</span></p>
           </Link>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             <ThemeToggle />
-            <Button asChild variant="ghost" className="min-h-11"><Link to="/login"><ArrowLeft /> Back to log in</Link></Button>
+            <Button asChild variant="ghost" className="min-h-11"><Link to="/login"><ArrowLeft /> <span className="hidden sm:inline">Back to log in</span><span className="sr-only sm:hidden">Back to log in</span></Link></Button>
           </div>
         </div>
       </header>

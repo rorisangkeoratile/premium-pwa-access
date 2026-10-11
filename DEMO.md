@@ -6,7 +6,7 @@ This is the checklist for showing the system live. Everything on screen is a rea
 
 1. Start the app with `npm run dev` and open the address it prints.
 2. **Use one browser window and open one tab per person.** Every tab is its own login, and all tabs share the same data. Do **not** use a second browser, an incognito window or a phone for this: those cannot see each other's data yet (there is no backend), so they will look as if nothing updates.
-3. Log each tab in with the **Quick tap login** buttons on the login page. The one-time code is shown on screen.
+3. Log each tab in with the **Quick tap login** buttons on the login page. There is no code to enter; you go straight to the dashboard.
 4. In a dispatcher tab, press **Reset simulation** (in the Sensor node network panel). This clears every report, job and outage in every tab and starts from a quiet city.
 
 Tip: allow location for the site, and tap the bell then **Turn on** to allow device notifications, so the alerts also appear when a tab is in the background.

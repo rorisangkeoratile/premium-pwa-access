@@ -57,22 +57,22 @@ export function DashboardShell({ user, role, home, children }: { user: string; r
             <Logo />
             <div className="min-w-0">
               <p className="truncate text-[17px] font-extrabold text-navy">Lesedi<span className="text-primary">Link</span></p>
-              <p className="hidden text-[11px] font-semibold uppercase text-muted-foreground sm:block">Municipal electricity response</p>
+              <p className="hidden text-[11px] font-semibold uppercase text-muted-foreground lg:block">Municipal electricity response</p>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1 sm:gap-3">
-            <div role="status" className={`hidden items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold md:flex ${live ? "bg-success-soft text-success" : starting ? "bg-secondary text-muted-foreground" : "bg-warning-soft text-foreground"}`}>
+            <div role="status" className={`hidden items-center gap-2 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-bold md:flex ${live ? "bg-success-soft text-success" : starting ? "bg-secondary text-muted-foreground" : "bg-warning-soft text-foreground"}`}>
               <span className={`size-2 rounded-full ${live ? "bg-success" : starting ? "bg-muted-foreground/50" : "bg-warning"}`} />
               {live ? "All systems live" : starting ? "Starting…" : "Connecting sensors…"}
             </div>
             <ThemeToggle />
             {session && <div data-tour="notifications"><NotificationBell user={session} /></div>}
-            <div className="flex items-center gap-2 border-l border-border pl-2 sm:pl-4">
+            <div className="hidden items-center gap-2 border-l border-border pl-2 min-[400px]:flex sm:pl-4">
               <div className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary text-xs font-extrabold text-primary" title={`${user} · ${role}`}>
                 {initials}
                 <span className="sr-only"> — {user}, {role}</span>
               </div>
-              <div className="hidden sm:block"><p className="text-xs font-bold">{user}</p><p className="text-[11px] text-muted-foreground">{role}</p></div>
+              <div className="hidden max-w-40 sm:block"><p className="truncate text-xs font-bold">{user}</p><p className="truncate text-[11px] text-muted-foreground">{role}</p></div>
             </div>
             <Button variant="outline" className="min-h-11" onClick={logout}><LogOut /> <span className="hidden sm:inline">Log out</span><span className="sr-only sm:hidden">Log out</span></Button>
           </div>

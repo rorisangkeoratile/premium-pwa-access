@@ -585,7 +585,7 @@ function CustomerDashboard() {
         )}
       </div>
 
-      <section className="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Account summary" data-tour="summary">
+      <section className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Account summary" data-tour="summary">
         <Stat label="Supply status" value="Restored" note="Since 04:12 today" icon={Zap} />
         <Stat label="Open reports" value={String(openMine.length)} note={openMine[0] ? `${openMine[0].id} in progress` : "No open reports"} icon={FileText} />
         <Stat label="Next planned outage" value="Thu 09:00" note="Maintenance · 3 hours" icon={Clock3} />

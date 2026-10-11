@@ -104,21 +104,21 @@ function ManagerDashboard() {
     <DashboardShell home="/dashboard/manager" user={me?.name ?? "Manager"} role={me?.title ?? "Department manager"}>
       <PageHeading eyebrow="Department manager" title="Network intelligence" text="Live performance from the running simulation, with sample history for context" action={<Button variant="outline" onClick={exportReport}><Download /> Export report (CSV)</Button>} />
 
-      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Live performance">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Live performance">
         <Stat label="Outages today" value={String(summary.openedToday)} note={`${summary.open} still open · live`} icon={Zap} alert={summary.open > 0} />
         <Stat label="Response time" value={formatDuration(summary.avgResponseMs)} note={`ERT: on site within ${SLA_RESPONSE_MS / 3600000} h · live`} icon={Clock3} />
         <Stat label="Resolution time" value={formatDuration(summary.avgResolutionMs)} note={summary.resolved > 0 ? `${summary.resolved} resolved · live` : "Nothing resolved yet · live"} icon={Wrench} />
         <Stat label="Within ERT" value={summary.slaPct === undefined ? "—" : `${summary.slaPct}%`} note={`Target: ${SLA_TARGET}% · live`} icon={ShieldCheck} alert={summary.slaPct !== undefined && summary.slaPct < SLA_TARGET} />
       </section>
 
-      <section className="mt-3 grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Service delivery">
+      <section className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Service delivery">
         <Stat label="Status reports on time" value={summary.reportsPct === undefined ? "—" : `${summary.reportsPct}%`} note={summary.reportsOverdue > 0 ? `${summary.reportsOverdue} overdue right now` : "Every 30 min while a job is open"} icon={Timer} alert={summary.reportsOverdue > 0} />
         <Stat label="Parts & repair deadlines" value={summary.phasePct === undefined ? "—" : `${summary.phasePct}% met`} note={`${summary.awaitingParts} awaiting parts · ${summary.extensions} ERT extension${summary.extensions === 1 ? "" : "s"}`} icon={Wrench} />
         <Stat label="Past ERT now" value={String(summary.ertOverdue)} note={summary.ertOverdue > 0 ? "Open incidents running late" : "Every open incident on time"} icon={Clock3} alert={summary.ertOverdue > 0} />
         <Stat label="Customer satisfaction" value={summary.avgRating === undefined ? "—" : `${summary.avgRating} / 5`} note={summary.ratings > 0 ? `${summary.satisfiedPct}% satisfied · ${summary.ratings} rating${summary.ratings === 1 ? "" : "s"}` : "No feedback yet"} icon={Star} alert={summary.avgRating !== undefined && summary.avgRating < 3.5} />
       </section>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
+      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)]">
         <section className="rounded-md border border-border bg-card p-5">
           <div className="flex items-center justify-between">
             <div><h2 className="font-extrabold text-navy">Response time trend</h2><p className="text-xs text-muted-foreground">Average minutes for a crew to reach the site · earlier days are sample history, today is live</p></div>

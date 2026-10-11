@@ -124,14 +124,14 @@ function DispatcherDashboard() {
     <DashboardShell home="/dashboard/dispatcher" user={me?.name ?? "Dispatcher"} role={me?.title ?? "Dispatcher"}>
       <PageHeading eyebrow="Dispatcher" title="Control centre" text="City-wide electricity response overview" action={<span className="flex items-center gap-2 rounded-full bg-secondary px-3 py-2 text-xs font-extrabold text-primary"><Radio className="size-4" /> {crewOnline} of {crew.length} crews online · {dispatchersOnline} dispatcher{dispatchersOnline === 1 ? "" : "s"}</span>} />
 
-      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Live response metrics">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Live response metrics">
         <Stat label="Active outages" value={String(summary.open)} note={`${summary.openedToday} opened today`} icon={Siren} alert={summary.open > 0} />
         <Stat label="People affected" value={summary.affected.toLocaleString("en-ZA")} note="Estimate, open outages" icon={Users} />
         <Stat label="Avg. response" value={formatDuration(summary.avgResponseMs)} note={summary.ertOverdue + summary.reportsOverdue > 0 ? `${summary.ertOverdue} past ERT · ${summary.reportsOverdue} status report${summary.reportsOverdue === 1 ? "" : "s"} overdue` : summary.responded > 0 ? `${summary.responded} crew arrival${summary.responded === 1 ? "" : "s"} · ERT 2 h` : "ERT 2 h · no crew on site yet"} icon={Clock3} alert={summary.ertOverdue + summary.reportsOverdue > 0} />
         <Stat label="Crews available" value={`${availableCount} / ${crew.length}`} note={`${crewOnline} online now`} icon={Wrench} />
       </section>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(350px,.75fr)]">
+      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(340px,.75fr)]">
         <LiveMap markers={markers} focus={focus} onSelect={(id) => { if (allIncidents.some((item) => item.id === id)) setSelectedId(id); }} subtitle={`Tshwane metro · ${allIncidents.length} active incident${allIncidents.length === 1 ? "" : "s"}`} />
         <section className="rounded-md border border-border bg-card" aria-labelledby="queue-title">
           <div className="border-b border-border p-4">
@@ -170,7 +170,7 @@ function DispatcherDashboard() {
 
       <div className="mt-5"><NodeNetworkPanel /></div>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,.7fr)]">
+      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(340px,.7fr)]">
         <section className="rounded-md border border-border bg-card p-5">
           {selected ? (
             <>

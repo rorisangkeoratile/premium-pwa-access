@@ -138,7 +138,7 @@ export function AutoTicketDetail({ ticket }: { ticket: AutoTicket }) {
     <div className="space-y-3 text-sm">
       <div className="rounded-md bg-danger-soft p-3">
         <p className="font-extrabold text-destructive">Auto-detected · no resident report</p>
-        <p className="mt-1 text-xs text-muted-foreground">Opened {ago(ticket.openedAt)} ago because {silent.length} of {nodeDefs.filter((node) => node.areaId === ticket.areaId).length} nodes in {ticket.areaName} stopped sending heartbeats while the rest of the network stayed online.</p>
+        <p className="mt-1 text-xs text-muted-foreground">Opened {ago(ticket.openedAt) === "Just now" ? "just now" : `${ago(ticket.openedAt)} ago`} because {silent.length} of {nodeDefs.filter((node) => node.areaId === ticket.areaId).length} nodes in {ticket.areaName} stopped sending heartbeats while the rest of the network stayed online.</p>
         {ticket.clinicAffected && <p className="mt-2 text-xs font-bold text-destructive">Priority raised to Critical: a clinic is among the silent nodes.</p>}
       </div>
       <ul className="grid gap-1 sm:grid-cols-2">
