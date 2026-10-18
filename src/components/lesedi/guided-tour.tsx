@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { ArrowLeft, ArrowRight, Check, Compass, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, Compass, Hand, PlayCircle, Pointer, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { prefersReducedMotion } from "@/components/lesedi/motion";
+import { TourDemo } from "@/components/lesedi/tour-demo";
 import type { TourStep } from "@/lib/tour";
 
 const GAP = 12;
@@ -32,10 +33,14 @@ function bringIntoView(element: HTMLElement) {
   window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - offset), behavior: prefersReducedMotion() ? "auto" : "smooth" });
 }
 
+const FOCUSABLE = "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex='-1'])";
+
 /**
  * A step-by-step guide over a dashboard. Each cue card points at one part of the page, which is lit up while
  * the rest is dimmed. Back and Next move between cards, and Skip (or Escape) ends the guide.
- * The page cannot be used underneath while the guide is open, so a stray tap does not start a report.
+ * The page cannot be used underneath while the guide is open, so a stray tap does not start a report. The one
+ * exception is a "Your turn" card: there only the lit-up part can be used, so the resident does it for real,
+ * and the card says when they have. Other cards can play a short animation of their part at work.
  */
 export function GuidedTour({ steps, open, onClose }: { steps: TourStep[]; open: boolean; onClose: (finished: boolean) => void }) {
   const [index, setIndex] = useState(0);
@@ -45,8 +50,12 @@ export function GuidedTour({ steps, open, onClose }: { steps: TourStep[]; open: 
   const card = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
+  /** Whether the resident has done what this card's "Your turn" asked. */
+  const [tried, setTried] = useState(false);
   const step = steps[index];
   const last = index === steps.length - 1;
+  // Only offered while the part is on the page; otherwise the card just explains it.
+  const trying = Boolean(step?.tryIt && box);
 
   // Start from the first card each time the guide opens, and give focus back to the page when it closes.
   useEffect(() => {
@@ -83,15 +92,35 @@ export function GuidedTour({ steps, open, onClose }: { steps: TourStep[]; open: 
     heading.current?.focus({ preventScroll: true });
     window.addEventListener("scroll", measure, { passive: true });
     window.addEventListener("resize", measure);
+    // A part that grows while it is being tried (the map opening, the photo section unfolding) keeps its highlight.
+    const resized = element && "ResizeObserver" in window ? new ResizeObserver(measure) : null;
+    if (element) resized?.observe(element);
     return () => {
       window.removeEventListener("scroll", measure);
       window.removeEventListener("resize", measure);
+      resized?.disconnect();
     };
   }, [open, index, measure]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // On a "Your turn" card, watch for the resident doing it inside the lit-up part.
+  useEffect(() => {
+    setTried(false);
+    const action = step?.tryIt;
+    if (!open || !action) return;
+    const onAction = (event: Event) => {
+      const element = event.target instanceof Element ? event.target : null;
+      if (!element || !element.closest(`[data-tour="${step.target}"]`)) return;
+      if (action.selector && !element.closest(action.selector)) return;
+      setTried(true);
+    };
+    const type = action.on ?? "click";
+    document.addEventListener(type, onAction, true);
+    return () => document.removeEventListener(type, onAction, true);
+  }, [open, index]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useLayoutEffect(() => {
     if (open && card.current) setCardHeight(card.current.offsetHeight);
-  }, [open, index, viewport.width]);
+  }, [open, index, viewport.width, tried, trying]);
 
   const back = () => setIndex((current) => Math.max(0, current - 1));
   const next = () => (last ? onClose(true) : setIndex((current) => Math.min(steps.length - 1, current + 1)));
@@ -99,18 +128,21 @@ export function GuidedTour({ steps, open, onClose }: { steps: TourStep[]; open: 
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
+      const part = trying ? findTarget(step?.target) : null;
+      // Arrow keys inside the part being tried belong to it (choosing an option), not to the guide.
+      const inPart = Boolean(part && event.target instanceof Node && part.contains(event.target));
       if (event.key === "Escape") onClose(false);
-      else if (event.key === "ArrowRight") next();
-      else if (event.key === "ArrowLeft") back();
+      else if (event.key === "ArrowRight" && !inPart) next();
+      else if (event.key === "ArrowLeft" && !inPart) back();
       else if (event.key === "Tab" && card.current) {
-        // Keep keyboard focus inside the card while the guide is open.
-        const focusable = Array.from(card.current.querySelectorAll<HTMLElement>("button:not([disabled])"));
+        // Keep keyboard focus inside the card while the guide is open, and in the part being tried on a "Your turn" card.
+        const focusable = [...(part ? Array.from(part.querySelectorAll<HTMLElement>(FOCUSABLE)) : []), ...Array.from(card.current.querySelectorAll<HTMLElement>("button:not([disabled])"))];
         const first = focusable[0];
         const end = focusable.at(-1);
         if (!first || !end) return;
         if (event.shiftKey && document.activeElement === first) { event.preventDefault(); end.focus(); }
         else if (!event.shiftKey && document.activeElement === end) { event.preventDefault(); first.focus(); }
-        else if (!card.current.contains(document.activeElement)) { event.preventDefault(); first.focus(); }
+        else if (!card.current.contains(document.activeElement) && !inPart) { event.preventDefault(); first.focus(); }
       }
     };
     document.addEventListener("keydown", onKey);
@@ -135,27 +167,39 @@ export function GuidedTour({ steps, open, onClose }: { steps: TourStep[]; open: 
   }
 
   return (
-    <div className="fixed inset-0 z-[60]" role="presentation">
-      {/* Catches taps on the page while the guide is open. The highlight's shadow does the dimming. */}
-      <div className={`absolute inset-0 ${box ? "" : "bg-black/55"}`} aria-hidden="true" />
+    <div className="pointer-events-none fixed inset-0 z-[60]" role="presentation">
+      {/* Catches taps on the page while the guide is open. The highlight's shadow does the dimming. On a
+          "Your turn" card it leaves a hole over the lit-up part, so that part can be used. */}
+      {trying && box ? (
+        [
+          { top: 0, left: 0, right: 0, height: Math.max(0, box.top) },
+          { top: box.top + box.height, left: 0, right: 0, bottom: 0 },
+          { top: box.top, left: 0, width: Math.max(0, box.left), height: box.height },
+          { top: box.top, left: box.left + box.width, right: 0, height: box.height },
+        ].map((panel, position) => <div key={position} className="pointer-events-auto absolute" style={panel} aria-hidden="true" />)
+      ) : (
+        <div className={`pointer-events-auto absolute inset-0 ${box ? "" : "bg-black/55"}`} aria-hidden="true" />
+      )}
       {box && (
         <div
           aria-hidden="true"
           className="pointer-events-none absolute rounded-lg ring-2 ring-accent transition-[top,left,width,height] duration-300 motion-reduce:transition-none"
           style={{ ...box, boxShadow: "0 0 0 9999px rgb(0 0 0 / 0.55)" }}
-        />
+        >
+          {trying && !tried && <span className="tour-ring absolute -inset-1 rounded-xl ring-4 ring-accent" />}
+        </div>
       )}
       <div
         ref={card}
         role="dialog"
-        aria-modal="true"
+        aria-modal={!trying}
         aria-labelledby="tour-title"
         aria-describedby="tour-body"
-        className="absolute w-auto max-w-[min(24rem,calc(100vw-2rem))] rounded-md border border-border bg-card p-5 shadow-2xl sm:w-96"
+        className="pointer-events-auto absolute w-auto max-w-[min(24rem,calc(100vw-2rem))] rounded-md border border-border bg-card p-5 shadow-2xl sm:w-96"
         style={placement}
       >
         <div className="flex items-center justify-between gap-3">
-          <p className="flex items-center gap-2 text-[10px] font-extrabold uppercase text-primary"><Compass className="size-4" /> How it works · {index + 1} of {steps.length}</p>
+          <p className="flex items-center gap-2 text-[10px] font-extrabold uppercase text-primary">{trying ? <Hand className="size-4" /> : step.demo ? <PlayCircle className="size-4" /> : <Compass className="size-4" />} {trying ? "Your turn" : step.demo ? "Watch how it works" : "How it works"} · {index + 1} of {steps.length}</p>
           <Button variant="ghost" size="icon" className="-mr-2 size-9 shrink-0" aria-label="Close the guide" onClick={() => onClose(false)}><X /></Button>
         </div>
         <div className="mt-2 flex gap-1" aria-hidden="true">
@@ -163,11 +207,18 @@ export function GuidedTour({ steps, open, onClose }: { steps: TourStep[]; open: 
         </div>
         <h2 id="tour-title" ref={heading} tabIndex={-1} className="mt-3 text-lg font-extrabold text-navy outline-none">{step.title}</h2>
         <p id="tour-body" className="mt-1 text-sm text-muted-foreground" aria-live="polite">{step.body}</p>
+        {trying && step.tryIt && (
+          <p role="status" className={`mt-3 flex items-start gap-2 rounded-md p-3 text-sm font-bold ${tried ? "bg-success-soft text-success" : "bg-secondary text-navy"}`}>
+            {tried ? <CheckCircle2 className="mt-0.5 size-4 shrink-0" /> : <Pointer className="mt-0.5 size-4 shrink-0 text-primary" />}
+            <span>{tried ? step.tryIt.done : step.tryIt.prompt}</span>
+          </p>
+        )}
+        {step.demo && !trying && <TourDemo key={index} name={step.demo} />}
         <div className="mt-4 flex items-center justify-between gap-2">
           <Button variant="ghost" size="sm" className="min-h-11 px-2 text-muted-foreground" onClick={() => onClose(false)}>{last ? "Close" : "Skip guide"}</Button>
           <div className="flex gap-2">
             <Button variant="outline" className="min-h-11" disabled={index === 0} onClick={back}><ArrowLeft /> Back</Button>
-            <Button className="min-h-11" onClick={next}>{last ? <><Check /> Got it</> : <>Next <ArrowRight /></>}</Button>
+            <Button className="min-h-11" variant={trying && !tried ? "outline" : "default"} onClick={next}>{trying && !tried ? <>Skip this <ArrowRight /></> : last ? <><Check /> Got it</> : <>Next <ArrowRight /></>}</Button>
           </div>
         </div>
       </div>
